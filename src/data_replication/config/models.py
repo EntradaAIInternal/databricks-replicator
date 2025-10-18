@@ -126,6 +126,8 @@ class ReplicationConfig(BaseModel):
     source_catalog: Optional[str] = None
     intermediate_catalog: Optional[str] = None
     enforce_schema: Optional[bool] = True
+    copy_files: Optional[bool] = False
+    external_location_mapping: Optional[dict] = None
 
     @field_validator("source_catalog", "intermediate_catalog")
     @classmethod
