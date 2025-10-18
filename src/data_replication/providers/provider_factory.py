@@ -151,6 +151,7 @@ class ProviderFactory:
             retry_config,
             max_workers,
             timeout_seconds,
+            self.config.external_location_mapping,
         )
 
     def log_run_result(self, result: RunResult) -> None:

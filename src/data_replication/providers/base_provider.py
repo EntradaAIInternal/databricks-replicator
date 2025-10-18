@@ -37,6 +37,7 @@ class BaseProvider(ABC):
         retry: Optional[RetryConfig] = None,
         max_workers: int = 2,
         timeout_seconds: int = 1800,
+        external_location_mapping: Optional[dict] = None,
     ):
         """
         Initialize the base provider.
@@ -61,6 +62,7 @@ class BaseProvider(ABC):
         )
         self.max_workers = max_workers
         self.timeout_seconds = timeout_seconds
+        self.external_location_mapping = external_location_mapping
         self.catalog_name: Optional[str] = None
 
     @abstractmethod
@@ -387,7 +389,7 @@ class BaseProvider(ABC):
         # Apply exclusions first
         tables = [table for table in tables if table not in exclude_names]
 
-        # Then filter by table type (STREAMING_TABLE and MANAGED only)
+        # Then filter by table types
         return self.db_ops.filter_tables_by_type(
             self.catalog_name,
             schema_name,

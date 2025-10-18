@@ -81,11 +81,15 @@ class BackupProvider(BaseProvider):
         actual_source_table = None
         dlt_flag = None
         backup_query = None
+        source_table_type = None
 
         try:
             table_details = self.db_ops.get_table_details(source_table)
             actual_source_table = table_details["table_name"]
             dlt_flag = table_details["is_dlt"]
+            
+            # Get source table type for audit logging
+            source_table_type = self.db_ops.get_table_type(source_table)
 
             # Perform backup using deep clone and unset parentTableId property
             backup_query = f"""CREATE OR REPLACE TABLE {backup_table}
@@ -127,6 +131,7 @@ class BackupProvider(BaseProvider):
                     details={
                         "backup_table": backup_table,
                         "source_table": actual_source_table,
+                        "table_type": source_table_type,
                         "backup_query": backup_query,
                         "dlt_flag": dlt_flag,
                     },
@@ -159,6 +164,7 @@ class BackupProvider(BaseProvider):
                     details={
                         "backup_table": backup_table,
                         "source_table": actual_source_table,
+                        "table_type": source_table_type,
                         "backup_query": backup_query,
                         "dlt_flag": dlt_flag,
                     },
@@ -194,6 +200,7 @@ class BackupProvider(BaseProvider):
                 details={
                     "backup_table": backup_table,
                     "source_table": actual_source_table,
+                    "table_type": source_table_type,
                     "backup_query": backup_query,
                     "dlt_flag": dlt_flag,
                 },

@@ -13,9 +13,9 @@ This system provides incremental data replication capabilities between Databrick
 ## Supported Object Types
 - Streaming Tables (data only, not checkpoints)
 - Managed Table
+- External Table
 
 ## Unsupported Object Types
-- External Table
 - Materialized Views
 - SQL Views
 - Checkpointing for streaming tables
@@ -46,7 +46,6 @@ The system automatically handles Delta Live Tables complexities:
 ## Installation
 
 ### Prerequisites
-- Access to Databricks workspaces
 - Appropriate permissions for table operations and secret access
 - Cloud Token based D2D Delta Sharing Enabled
 - DLT Streaming tables already exist in target

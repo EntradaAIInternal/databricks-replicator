@@ -17,8 +17,6 @@ class TableType(str, Enum):
     MANAGED = "managed"
     STREAMING_TABLE = "streaming_table"
     EXTERNAL = "external"
-    VIEW = "view"
-    MATERIALIZED_VIEW = "materialized_view"
 
 
 class ExecuteAt(str, Enum):
@@ -126,8 +124,7 @@ class ReplicationConfig(BaseModel):
     source_catalog: Optional[str] = None
     intermediate_catalog: Optional[str] = None
     enforce_schema: Optional[bool] = True
-    copy_files: Optional[bool] = False
-    external_location_mapping: Optional[dict] = None
+    copy_files: Optional[bool] = True
 
     @field_validator("source_catalog", "intermediate_catalog")
     @classmethod
@@ -189,7 +186,7 @@ class TargetCatalogConfig(BaseModel):
 
     catalog_name: str
     table_types: List[TableType] = Field(
-        default_factory=lambda: [TableType.MANAGED, TableType.STREAMING_TABLE]
+        default_factory=lambda: [TableType.MANAGED, TableType.STREAMING_TABLE, TableType.EXTERNAL]
     )
     schema_filter_expression: Optional[str] = None
     backup_config: Optional[BackupConfig] = None
@@ -272,6 +269,7 @@ class ReplicationSystemConfig(BaseModel):
     target_databricks_connect_config: DatabricksConnectConfig
     audit_config: AuditConfig
     target_catalogs: List[TargetCatalogConfig]
+    external_location_mapping: Optional[dict] = None
     concurrency: Optional[ConcurrencyConfig] = Field(default_factory=ConcurrencyConfig)
     retry: Optional[RetryConfig] = Field(default_factory=RetryConfig)
     logging: Optional[LoggingConfig] = Field(default_factory=LoggingConfig)

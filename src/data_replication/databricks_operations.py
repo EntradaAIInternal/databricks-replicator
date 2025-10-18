@@ -83,7 +83,7 @@ class DatabricksOperations:
         table_types: List[TableType],
     ) -> List[str]:
         """
-        Filter a list of table names to only include STREAMING_TABLE and MANAGED types.
+        Filter a list of table names to only include selected types.
 
         Args:
             catalog_name: Name of the catalog
@@ -91,7 +91,7 @@ class DatabricksOperations:
             table_names: List of table names to filter
 
         Returns:
-            List of table names that are STREAMING_TABLE or MANAGED
+            List of table names that are of the selected types
         """
 
         return [
@@ -230,7 +230,17 @@ class DatabricksOperations:
                 table_type = "STREAMING_TABLE"
                 return table_type
 
-            return "MANAGED"
+            # when it's Managed, check if it's STREAMING_TABLE as it may be an external table when delta shared
+            location = (
+                self.spark.sql(f"DESCRIBE DETAIL {table_name}")
+                .collect()[0]
+                .asDict()["location"]
+            )
+            if location and "/tables/" in location:
+                table_type = "MANAGED"
+                return table_type
+
+            return "EXTERNAL"
 
         raise TableNotFoundError(f"Table {table_name} does not exist")
 

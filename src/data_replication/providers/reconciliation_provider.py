@@ -132,6 +132,7 @@ class ReconciliationProvider(BaseProvider):
             extra={"run_id": self.run_id, "operation": "reconciliation"},
         )
 
+        source_table_type = None
         try:
             # Refresh target table metadata
             self.db_ops.refresh_table_metadata(target_table)
@@ -139,6 +140,9 @@ class ReconciliationProvider(BaseProvider):
             # Check if source table exists
             if not self.spark.catalog.tableExists(source_table):
                 raise TableNotFoundError(f"Source table does not exist: {source_table}")
+
+            # Get source table type for audit logging
+            source_table_type = self.db_ops.get_table_type(source_table)
 
             reconciliation_results = {}
             failed_checks = []
@@ -335,6 +339,7 @@ class ReconciliationProvider(BaseProvider):
                     details={
                         "source_table": source_table,
                         "target_table": target_table,
+                        "table_type": source_table_type,
                         "reconciliation_results": reconciliation_results,
                         "failed_checks": failed_checks,
                         "skipped_checks": skipped_checks,
@@ -387,6 +392,7 @@ class ReconciliationProvider(BaseProvider):
                     details={
                         "source_table": source_table,
                         "target_table": target_table,
+                        "table_type": source_table_type,
                         "reconciliation_results": reconciliation_results,
                         "failed_checks": failed_checks,
                         "skipped_checks": skipped_checks,
@@ -422,6 +428,7 @@ class ReconciliationProvider(BaseProvider):
                 details={
                     "source_table": source_table,
                     "target_table": target_table,
+                    "table_type": source_table_type,
                 },
             )
 
