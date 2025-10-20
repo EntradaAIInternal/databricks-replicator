@@ -32,6 +32,7 @@ if parent_folder not in sys.path:
 
 import argparse
 import uuid
+import yaml
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
@@ -152,6 +153,18 @@ def main():
         "--verbose", "-v", action="store_true", help="Enable verbose logging"
     )
 
+    parser.add_argument(
+        "--target-schemas",
+        type=str,
+        help="JSON string containing list of schema configurations to override target_schemas in config file"
+    )
+
+    parser.add_argument(
+        "--concurrency",
+        type=str,
+        help="JSON string containing concurrency configuration to override concurrency settings in config file"
+    )
+
     args = parser.parse_args()
 
     # Validate config file exists
@@ -165,7 +178,7 @@ def main():
 
     try:
         # Load and validate configuration
-        config = ConfigLoader.load_from_file(config_path)
+        config = ConfigLoader.load_from_file(config_path, args.target_schemas, args.concurrency)
         logger = create_logger(config)
 
         logger.info(f"Loaded configuration from {config_path}")
