@@ -51,10 +51,11 @@ The system automatically handles Streaming Tables complexities:
 ## Installation
 
 ### Prerequisites
-- Enable Delta Sharing (DS) across clouds. https://docs.databricks.com/aws/en/delta-sharing/set-up#gsc.tab=0
-- Source and target Service Principal with metastore admin and workspace admin access
-- SP OAuth Token stored in Databricks secrets created if executed outside Databricks
+- Source and target User or Service Principal with metastore admin and workspace admin access
+- OAuth Token stored in Databricks secrets created if executed at client env instead of Databricks
 - For Streaming Table replication, tables need to already exist in target DBX
+- For cross-metastore replication, enable Delta Sharing (DS) across clouds. https://docs.databricks.com/aws/en/delta-sharing/set-up#gsc.tab=0
+
 
 
 ### Getting Started
