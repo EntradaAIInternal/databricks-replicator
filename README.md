@@ -71,6 +71,9 @@ make setup
 3. Run - the system provides a CLI tool `data-replicator` with the following commands:
 
 ```bash
+# Check all available args
+data-replicator --help
+
 # Run all enabled operations
 data-replicator <config.yaml>
 
@@ -87,9 +90,6 @@ data-replicator <config.yaml> --dry-run
 
 # Combine dry run with specific operation
 data-replicator <config.yaml> --operation backup --dry-run
-
-# Enable verbose logging
-data-replicator <config.yaml> --verbose
 ```
 
 ### Operation Types

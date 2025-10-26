@@ -54,9 +54,7 @@ def create_logger(config) -> DataReplicationLogger:
 def validate_execution_environment(config, operation, logger) -> int:
     """Validate configuration requirements based on execution environment and operation."""
     if config.execute_at == "source" and operation not in ["backup"]:
-        logger.error(
-            "When execute_at is 'source', only 'backup' operation is allowed"
-        )
+        logger.error("When execute_at is 'source', only 'backup' operation is allowed")
         return 1
 
     if config.execute_at == "target" and operation in [
@@ -192,9 +190,7 @@ def main():
         help="Show what would be processed without executing operations",
     )
 
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose logging"
-    )
+    parser.add_argument("--run_id", action="store_true", help="Unique Run ID")
 
     parser.add_argument(
         "--target-schemas",
@@ -237,11 +233,15 @@ def main():
             # Add dry-run logic here
             return 0
 
-        validation_result = validate_execution_environment(config, args.operation, logger)
+        validation_result = validate_execution_environment(
+            config, args.operation, logger
+        )
         if validation_result != 0:
             return validation_result
 
         run_id = str(uuid.uuid4())
+        if args.run_id:
+            run_id = args.run_id
 
         w = WorkspaceClient()
         # Note: In production, tokens should be retrieved from Databricks secrets
@@ -312,11 +312,6 @@ def main():
         #     logger.info("Delta share operations not yet implemented")
 
         if args.operation in ["all", "replication"]:
-            # if args.operation == "all":
-            #     time.sleep(
-            #         120
-            #     )  # Ensure delta share metadata is available before replication
-
             # Check if replication is configured
             replication_catalogs = [
                 cat
