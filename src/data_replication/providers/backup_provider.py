@@ -40,9 +40,15 @@ class BackupProvider(BaseProvider):
             self.logger.info(
                 f"""Creating backup catalog: {backup_config.backup_catalog} at location: {backup_config.backup_catalog_location}"""
             )
-            self.db_ops.create_catalog_if_not_exists(
-                backup_config.backup_catalog, backup_config.backup_catalog_location
-            )
+            try:
+                self.db_ops.create_catalog(
+                    backup_config.backup_catalog,
+                    backup_config.backup_catalog_location,
+                )
+            except Exception:
+                self.logger.warning(
+                    f"""Failed to create backup catalog: {backup_config.backup_catalog}."""
+                )
 
         # Create delta share recipient if configured
         if backup_config.create_recipient:
