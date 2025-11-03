@@ -29,8 +29,6 @@ audit_config:
   audit_table: "data_replication.audit.audit_logging"
 
 table_types: ["streaming_table"]
-target_schemas:
-  - schema_name: "bronze_1"
 backup_config:
   enabled: true
   create_backup_catalog: true
