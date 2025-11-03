@@ -1,7 +1,7 @@
-# 1. Create delta share infrastructure in this toolincluding recipient, shares and catalogs with default system generated names.
-# 2. Enable backup with default system generated backup catalog and share names.
-# 3. Enable replication with default system generated shared catalog
-# 4. Enable reconciliation with default system generated shared catalog
+# 1. Create delta share infrastructure in this tool including backup catalog, recipient, shares and shared catalogs with default system generated names.
+# 2. Export of source Streaming table backing table as delta table into backup catalog and share.
+# 3. Deep clone backup delta table into target Streaming table backing table.
+# 4. Reconciliate data between source and target Streaming table.
 
 version: "1.0"
 
