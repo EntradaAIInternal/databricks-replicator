@@ -52,6 +52,14 @@ external_location_mapping:
 # streaming table can not be backed up and replicate with other objects together.
 table_types: ["streaming_table"]
 
+# Optional at replication group level or catalog level:
+# supported volume types: managed, external.
+# Volume replication supports:
+# - managed: Uses CREATE VOLUME AS DEEP CLONE for full data replication
+# - external: Uses CREATE VOLUME LOCATION with external location mapping
+# Sequential processing: all tables complete before volumes start processing
+volume_types: ["managed", "external"]
+
 # Optional: backup configuration (at replication group level)
 backup_config:
   # Mandatory at replication group level or catalog level: whether to backup catalog.
@@ -143,6 +151,12 @@ target_catalogs:
     # Mandatory at replication group level or catalog level: supported types: streaming_table, managed, external.
     # streaming table can not be backed up and replicate with other objects together.
     table_types: ["streaming_table"]
+    # Optional at replication group level or catalog level: supported volume types: managed, external.
+    # Volume replication strategies:
+    # - managed: Deep clone volumes with data replication (CREATE VOLUME AS DEEP CLONE)
+    # - external: Map external locations using external_location_mapping (CREATE VOLUME LOCATION)
+    # Note: external volumes require external_location_mapping configuration above
+    volume_types: ["managed", "external"]
     # Optional: target_schema list. target_schemas takes precedence over schema_filter_expression.
     target_schemas:
       # Optional: target schema name list. if not provided, all schemas are included based on schema_filter_expression or all schemas in catalog.
@@ -153,10 +167,17 @@ target_catalogs:
         tables:
           - table_name: "product_metrics"
           - table_name: "sales_data"
+        # Optional: include specific volumes in the schema. if not provided, all volumes are included.
+        volumes:
+          - volume_name: "data_volume"
+          - volume_name: "temp_volume"
       - schema_name: "bonze_3"
         # Optional: exclude specific tables in the schema. if not provided, all tables are included.
         exclude_tables:
           - table_name: "temp_table"
+        # Optional: exclude specific volumes in the schema. if not provided, all volumes are included.
+        exclude_volumes:
+          - volume_name: "old_volume"
     # Optional: filter to select specific schemas.
     # config schema_filter_expression and target_schemas at the same time not allowed.
     schema_filter_expression: "databaseName like 'bonze_%'"
@@ -183,3 +204,17 @@ retry:
   max_attempts: 3
   # Optional: delay between retry attempts in seconds. default is 5.
   retry_delay_seconds: 5
+
+# Optional: Logging settings
+logging:
+  # Optional: logging level. default is "INFO".
+  # Supported levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # Optional: log format. default is "json".
+  # Supported formats: "text" or "json"
+  format: "json"
+  # Optional: whether to log to file. default is false.
+  log_to_file: false
+  # Optional: log file path. default is None.
+  # Required if log_to_file is true
+  log_file_path: null
