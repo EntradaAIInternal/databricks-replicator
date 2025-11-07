@@ -31,7 +31,7 @@ target_databricks_connect_config:
     secret_scope: "my_secret_scope"
     secret_key: "aws_pat"
   # Optional: Source cluster ID. default is null to use serverless endpoint.
-  cluster_id: null    
+  cluster_id: null
 
 # Mandatory: Audit logging configuration
 audit_config:
@@ -48,17 +48,31 @@ audit_config:
 external_location_mapping:
 "abfss://test@oneenvadls.dfs.core.windows.net/": "s3://one-env-uc-external-location/test/"
 
-# Mandatory at replication group level or catalog level:
-# supported types: streaming_table, managed, external.
-# streaming table can not be backed up and replicate with other objects together.
+# At least one of uc_object_types, table_types, volume_types must be provided.
+# Optional at replication group level or catalog level. can be overriden by args
+# when table_tag or column tag is included in uc_object_types, table_types must be provided.
+# when volume_tag is included in uc_object_types, volume_types must be provided.
+# when view_tag is included in uc_object_types, table_types must include view.
+uc_object_types:
+  [
+    "catalog",
+    "catalog_tag",
+    "schema",
+    "schema_tag",
+    "view_tag",
+    "volume",
+    "volume_tag",
+    "table_tag",
+    "column_tag",
+  ]
+
+# Optional at replication group level or catalog level. can be overriden by args
+# supported types: streaming_table, managed, external, view.
+# streaming table can not be backed up and replicate with other table types together.
 table_types: ["streaming_table"]
 
-# Optional at replication group level or catalog level:
+# Optional at replication group level or catalog level. can be overriden by args
 # supported volume types: managed, external.
-# Volume replication supports:
-# - managed: Uses CREATE VOLUME AS DEEP CLONE for full data replication
-# - external: Uses CREATE VOLUME LOCATION with external location mapping
-# Sequential processing: all tables complete before volumes start processing
 volume_types: ["managed", "external"]
 
 # Optional: backup configuration (at replication group level)
@@ -93,6 +107,10 @@ backup_config:
 replication_config:
   # Mandatory at replication group level or catalog level: whether to replicate catalog.
   enabled: true
+  # Optional: whether to replicate data. default is true.
+  replicate_data: true
+  # Optional: whether to replicate uc metadata. default is true.
+  replicate_uc: true
   # Optional: whether to replicate the catalog if it does not exist on target.default is false.
   create_target_catalog: false
   # Optional: target catalog location. default is None.
@@ -105,6 +123,8 @@ replication_config:
   # Optional: shared catalog name/source catalog name. default to __replication_internal_<catalog_name>_from_<source_databricks_connect_config.name>_shared for streaming table
   # <catalog_name>_from_<source_databricks_connect_config.name>_shared for others
   source_catalog: "__replication_internal_catalog_example_from_azure_shared"
+  # Optional: source catalog name in the source for replication. if not provided, same as target catalog.
+  original_source_catalog: "catalog_example"
   # Optional: whether to create intermediate catalog for replication. default is false.
   create_intermediate_catalog: false
   # Optional: intermediate catalog for replication. default is None.
@@ -113,6 +133,10 @@ replication_config:
   intermediate_catalog_location: null
   # Optional: whether to enforce schema during replication. default is true.
   enforce_schema: true
+  # Optional: whether to copy files during replication. default is true.
+  copy_files: true
+  # Optional: whether to overwrite tags during replication. default is true.
+  overwrite_tags: true
 
 # Optional: reconciliation configuration (at replication group level)
 reconciliation_config:
@@ -145,26 +169,24 @@ reconciliation_config:
   # Optional: enable missing data checks if row count check passes
   missing_data_check: true
 
-# Optional: target catalog configurations list
+# Optional: target catalog configurations list. can be overriden by args
 target_catalogs:
   # Mandatory: target catalog name
   - catalog_name: "catalog_example"
-    # Mandatory at replication group level or catalog level: supported types: streaming_table, managed, external.
-    # streaming table can not be backed up and replicate with other objects together.
+    # Optional at replication group level or catalog level: supported types: streaming_table, managed, external.
+    # streaming table can not be backed up and replicate with other table types together.
     table_types: ["streaming_table"]
     # Optional at replication group level or catalog level: supported volume types: managed, external.
-    # Volume replication strategies:
-    # - managed: Deep clone volumes with data replication (CREATE VOLUME AS DEEP CLONE)
-    # - external: Map external locations using external_location_mapping (CREATE VOLUME LOCATION)
     # Note: external volumes require external_location_mapping configuration above
+    # supported volume types: managed, external.
     volume_types: ["managed", "external"]
-    # Optional: target_schema list. target_schemas takes precedence over schema_filter_expression.
+    # Optional: target_schema list. target_schemas takes precedence over schema_filter_expression. can be overriden by args
     target_schemas:
       # Optional: target schema name list. if not provided, all schemas are included based on schema_filter_expression or all schemas in catalog.
       # config schema_filter_expression and target_schemas at the same time not allowed.
       - schema_name: "bonze_1"
       - schema_name: "bonze_2"
-        # Optional: include specific tables in the schema. if not provided, all tables are included.
+        # Optional: include specific tables in the schema. if not provided, all tables are included. can be overriden by args
         tables:
           - table_name: "product_metrics"
           - table_name: "sales_data"
@@ -179,6 +201,11 @@ target_catalogs:
         # Optional: exclude specific volumes in the schema. if not provided, all volumes are included.
         exclude_volumes:
           - volume_name: "old_volume"
+    # Optional: exclude_schema list.
+    exclude_schemas:
+      # Optional: exclude specific schemas in the catalog.
+      - schema_name: "bonze_exclude_1"
+      - schema_name: "bonze_exclude_2"
     # Optional: filter to select specific schemas.
     # config schema_filter_expression and target_schemas at the same time not allowed.
     schema_filter_expression: "databaseName like 'bonze_%'"
@@ -194,7 +221,7 @@ target_catalogs:
 
 # Optional: Concurrency settings
 concurrency:
-  # Optional: maximum number of concurrent tasks. default is 4.
+  # Optional: maximum number of concurrent tasks. default is 4. can be overridden by args
   max_workers: 4
   # Optional: timeout for each task. default is 3600.
   timeout_seconds: 3600

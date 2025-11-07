@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional, Type
 
 from databricks.connect import DatabricksSession
-
+from databricks.sdk import WorkspaceClient
 from ..audit.audit_logger import AuditLogger
 from ..audit.logger import DataReplicationLogger
 from ..config.models import (
@@ -35,7 +35,7 @@ class ProviderFactory:
     """
 
     # Valid operation types
-    VALID_OPERATIONS = {"backup", "replication", "reconciliation", "uc_replication"}
+    VALID_OPERATIONS = {"backup", "replication", "reconciliation"}
 
     def __init__(
         self,
@@ -43,6 +43,7 @@ class ProviderFactory:
         config: ReplicationSystemConfig,
         spark: DatabricksSession,
         logging_spark: DatabricksSession,
+        workspace_client: WorkspaceClient,
         logger: DataReplicationLogger,
         run_id: Optional[str] = None,
     ):
@@ -67,6 +68,7 @@ class ProviderFactory:
         self.config = config
         self.spark = spark
         self.logging_spark = logging_spark
+        self.workspace_client = workspace_client
         self.logger = logger
         self.run_id = run_id or str(uuid.uuid4())
         self.db_ops = DatabricksOperations(spark)
@@ -108,10 +110,6 @@ class ProviderFactory:
             return bool(
                 catalog.reconciliation_config and catalog.reconciliation_config.enabled
             )
-        elif self._operation_type == "uc_replication":
-            return bool(
-                catalog.uc_replication_config and catalog.uc_replication_config.enabled
-            )
         return False
 
     def create_provider(self, catalog: TargetCatalogConfig) -> "BaseProvider":
@@ -132,10 +130,6 @@ class ProviderFactory:
             from .reconciliation_provider import ReconciliationProvider
 
             provider_class = ReconciliationProvider
-        elif self._operation_type == "uc_replication":
-            from .uc_replication_provider import UCReplicationProvider
-
-            provider_class = UCReplicationProvider
         else:
             raise ValueError(f"Unknown operation type: {self._operation_type}")
 
@@ -157,6 +151,7 @@ class ProviderFactory:
             self.spark,
             self.logger,
             self.db_ops,
+            self.workspace_client,
             self.run_id,
             catalog,
             self.config.source_databricks_connect_config,
@@ -188,9 +183,9 @@ class ProviderFactory:
             table_info = (
                 f"{result.catalog_name}.{result.schema_name}.{result.object_name}"
             )
-            self.logger.info(
-                f"Operation {result.operation_type} {result.status} for {table_info}"
-            )
+            # self.logger.info(
+            #     f"Operation {result.operation_type} {result.status} for {table_info}"
+            # )
 
             # Log to audit table if AuditLogger is available
             if self.audit_logger:
@@ -473,14 +468,6 @@ class ProviderFactory:
             )
         return self.run_operations()
 
-    def run_uc_replication_operations(self) -> RunSummary:
-        """Run UC replication operations for all configured catalogs."""
-        if self._operation_type != "uc_replication":
-            raise ValueError(
-                "This factory is not configured for uc_replication operations"
-            )
-        return self.run_operations()
-
     # Factory methods for creating specific operation factories
     @classmethod
     def create_backup_factory(cls, *args, **kwargs) -> "ProviderFactory":
@@ -496,8 +483,3 @@ class ProviderFactory:
     def create_reconciliation_factory(cls, *args, **kwargs) -> "ProviderFactory":
         """Factory method to create a reconciliation provider factory."""
         return cls("reconciliation", *args, **kwargs)
-
-    @classmethod
-    def create_uc_replication_factory(cls, *args, **kwargs) -> "ProviderFactory":
-        """Factory method to create a UC replication provider factory."""
-        return cls("uc_replication", *args, **kwargs)

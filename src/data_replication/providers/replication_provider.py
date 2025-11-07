@@ -7,16 +7,40 @@ streaming tables, materialized views, and intermediate catalogs.
 
 from datetime import datetime, timezone
 from typing import List
+from databricks.sdk import WorkspaceClient
+
+from data_replication.databricks_operations import DatabricksOperations
 
 # from delta.tables import DeltaTable
-from ..config.models import RunResult, TableConfig, VolumeConfig
+from ..config.models import RunResult, TableConfig, UCObjectType, VolumeConfig
 from ..exceptions import ReplicationError, TableNotFoundError
-from ..utils import retry_with_logging
+from ..utils import (
+    get_workspace_url_from_host,
+    retry_with_logging,
+    create_spark_session,
+    validate_spark_session,
+)
 from .base_provider import BaseProvider
 
 
 class ReplicationProvider(BaseProvider):
-    """Provider for replication operations using deep clone and insert overwrite."""
+    """Provider for uc and data replication operations using deep clone and autoloader."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        source_host = self.source_databricks_config.host
+        source_secret_config = self.source_databricks_config.token
+        source_cluster_id = self.source_databricks_config.cluster_id
+        self.source_spark = create_spark_session(
+            host=source_host,
+            secret_config=source_secret_config,
+            cluster_id=source_cluster_id,
+            workspace_client=self.workspace_client,
+        )
+        validate_spark_session(
+            self.source_spark, get_workspace_url_from_host(source_host)
+        )
+        self.source_dbops = DatabricksOperations(self.source_spark)
 
     def get_operation_name(self) -> str:
         """Get the name of the operation for logging purposes."""
@@ -29,9 +53,33 @@ class ReplicationProvider(BaseProvider):
             and self.catalog_config.replication_config.enabled
         )
 
-    def process_table(self, schema_name: str, table_name: str) -> RunResult:
+    def process_table(self, schema_name: str, table_name: str) -> List[RunResult]:
         """Process a single table for replication."""
-        return self._replicate_table(schema_name, table_name)
+        results = []
+        if self.catalog_config.replication_config.replicate_data:
+            result = self._replicate_table(schema_name, table_name)
+            results.append(result)
+
+        if self.catalog_config.replication_config.replicate_uc:
+            if (
+                self.catalog_config.uc_object_types
+                and UCObjectType.TABLE_TAG in self.catalog_config.uc_object_types
+            ):
+                result = self._replicate_table_tags(
+                    schema_name,
+                    table_name,
+                )
+                results.append(result)
+            if (
+                self.catalog_config.uc_object_types
+                and UCObjectType.COLUMN_TAG in self.catalog_config.uc_object_types
+            ):
+                result = self._replicate_column_tags(
+                    schema_name,
+                    table_name,
+                )
+                results.append(result)
+        return results
 
     def process_volume(self, schema_name: str, volume_name: str) -> RunResult:
         """Process a single volume for replication."""
@@ -760,3 +808,180 @@ class ReplicationProvider(BaseProvider):
         else:
             # For regular tables, just return the deep clone query
             return sql
+
+    def _replicate_table_tags(
+        self,
+        schema_name: str,
+        table_name: str,
+    ) -> RunResult:
+        """
+        Replicate table tags from source to target table.
+
+        Args:
+            schema_name: Schema name
+            table_name: Table name to replicate tags for
+
+        Returns:
+            RunResult object for the tag replication operation
+        """
+        start_time = datetime.now(timezone.utc)
+        replication_config = self.catalog_config.replication_config
+        source_catalog = replication_config.original_source_catalog
+        target_catalog = self.catalog_config.catalog_name
+        source_table = f"`{source_catalog}`.`{schema_name}`.`{table_name}`"
+        target_table = f"`{target_catalog}`.`{schema_name}`.`{table_name}`"
+
+        unset_sql = None
+        set_sql = None
+        attempt = 1
+        max_attempts = self.retry.max_attempts
+        last_exception = None
+
+        try:
+            self.logger.info(
+                f"Starting table tag replication: {source_table} -> {target_table}",
+                extra={"run_id": self.run_id, "operation": "replication"},
+            )
+
+            # Use custom retry decorator with logging
+            @retry_with_logging(self.retry, self.logger)
+            def tagging_operation(unset_query: str, set_query: str):
+                if unset_query:
+                    self.spark.sql(unset_query)
+                if set_query:
+                    self.spark.sql(set_query)
+                return True
+
+            # Get target table tags
+            tag_names_list, tag_maps_list = self.db_ops.get_table_tags(
+                target_catalog, schema_name, table_name
+            )
+
+            # Unset existing tags if overwrite_tags is enabled
+            if tag_names_list and replication_config.overwrite_tags:
+                tag_names_str = ",".join([f"'{tag}'" for tag in tag_names_list])
+                unset_sql = f"ALTER TABLE `{target_catalog}`.`{schema_name}`.`{table_name}` UNSET TAGS ( {tag_names_str} )"
+
+            # Get source table tags
+            _, tag_maps_list_new = self.source_dbops.get_table_tags(
+                source_catalog, schema_name, table_name
+            )
+
+            # Merge tag maps if overwrite_tags is disabled
+            merged_tag_maps = (
+                {k: v for d in tag_maps_list_new for k, v in d.items()}
+                if tag_maps_list_new
+                else {}
+            )
+            if not replication_config.overwrite_tags and tag_maps_list:
+                existing_tag_maps = {k: v for d in tag_maps_list for k, v in d.items()}
+                merged_tag_maps = {**merged_tag_maps, **existing_tag_maps}
+
+            # Create SET TAGS SQL if there are tags to apply
+            if merged_tag_maps:
+                tag_maps_str = ",".join(
+                    [f"'{key}' = '{value}'" for key, value in merged_tag_maps.items()]
+                )
+                set_sql = f"ALTER TABLE `{target_catalog}`.`{schema_name}`.`{table_name}` SET TAGS ( {tag_maps_str} )"
+
+            # Execute tagging operation
+            result, last_exception, attempt, max_attempts = tagging_operation(
+                unset_sql, set_sql
+            )
+
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+
+            if result:
+                self.logger.info(
+                    f"Table tag replication completed successfully: {source_table} -> {target_table} "
+                    f"({duration:.2f}s)",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+
+                return RunResult(
+                    operation_type="replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=table_name,
+                    object_type="table_tags",
+                    status="success",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    details={
+                        "target_table": target_table,
+                        "source_table": source_table,
+                        "overwrite_tags": replication_config.overwrite_tags,
+                        "tags_applied": len(merged_tag_maps) if merged_tag_maps else 0,
+                        "unset_sql": unset_sql,
+                        "set_sql": set_sql,
+                    },
+                    attempt_number=attempt,
+                    max_attempts=max_attempts,
+                )
+
+        except Exception as e:
+            last_exception = e
+
+        # Handle failure case
+        end_time = datetime.now(timezone.utc)
+        duration = (end_time - start_time).total_seconds()
+
+        error_msg = (
+            f"Table tag replication failed after {max_attempts} attempts: "
+            f"{source_table} -> {target_table}"
+        )
+        if last_exception:
+            error_msg += f" | Last error: {str(last_exception)}"
+
+        self.logger.error(
+            error_msg,
+            extra={"run_id": self.run_id, "operation": "replication"},
+        )
+
+        return RunResult(
+            operation_type="replication",
+            catalog_name=target_catalog,
+            schema_name=schema_name,
+            object_name=table_name,
+            object_type="table_tags",
+            status="failed",
+            start_time=start_time.isoformat(),
+            end_time=end_time.isoformat(),
+            duration_seconds=duration,
+            error_message=str(last_exception) if last_exception else "Unknown error",
+            details={
+                "target_table": target_table,
+                "source_table": source_table,
+                "overwrite_tags": replication_config.overwrite_tags,
+                "unset_sql": unset_sql,
+                "set_sql": set_sql,
+            },
+            attempt_number=attempt,
+            max_attempts=max_attempts,
+        )
+
+    def _replicate_column_tags(
+        self,
+        schema_name: str,
+        table_name: str,
+    ) -> RunResult:
+        """
+        Replicate column tags from source to target table.
+
+        Args:
+            schema_name: Schema name
+            table_name: Table name to replicate column tags for
+        """
+        # Get source column tags
+        source_column_tags = self.db_ops.get_column_tags(schema_name, table_name)
+
+        # Apply column tags to target table
+        for column_name, tags in source_column_tags.items():
+            for tag, value in tags.items():
+                self.db_ops.set_column_tag(
+                    schema_name, table_name, column_name, tag, value
+                )
+
+        return RunResult(success=True)
