@@ -371,7 +371,6 @@ class DatabricksOperations:
         full_internal_table_name = (
             f"`__databricks_internal`.`{internal_schema_name}`.`{table_name_only}`"
         )
-        # print(full_internal_table_name)
         if self.spark.catalog.tableExists(full_internal_table_name):
             return full_internal_table_name
 
@@ -379,7 +378,6 @@ class DatabricksOperations:
         full_internal_table_name = (
             f"`__databricks_internal`.`{internal_schema_name}`.`{internal_table_name}`"
         )
-        # print(full_internal_table_name)
         if self.spark.catalog.tableExists(full_internal_table_name):
             return full_internal_table_name
 
@@ -388,7 +386,6 @@ class DatabricksOperations:
         full_internal_table_name = (
             f"`{catalog_name}`.`{schema_name}`.`{internal_table_name}`"
         )
-        # print(full_internal_table_name)
         if self.spark.catalog.tableExists(full_internal_table_name):
             return full_internal_table_name
 
@@ -397,7 +394,6 @@ class DatabricksOperations:
         full_internal_table_name = (
             f"`__databricks_internal`.`{internal_schema_name}`.`{internal_table_name}`"
         )
-        # print(full_internal_table_name)
         if self.spark.catalog.tableExists(full_internal_table_name):
             return full_internal_table_name
 

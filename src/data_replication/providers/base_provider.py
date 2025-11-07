@@ -135,6 +135,7 @@ class BaseProvider(ABC):
             catalog_name, schema_name, object_name, object_type, error_msg, start_time
         )
 
+    @abstractmethod
     def process_table(self, schema_name: str, table_name: str) -> RunResult:
         """
         Process a single table.
@@ -328,12 +329,7 @@ class BaseProvider(ABC):
                             result = future.result(timeout=self.timeout_seconds)
                             results.append(result)
 
-                            if result.status == "success":
-                                self.logger.info(
-                                    f"Successfully processed table "
-                                    f"{catalog_name}.{schema_name}.{table_name}"
-                                )
-                            else:
+                            if result.status != "success":
                                 self.logger.error(
                                     f"Failed to process table "
                                     f"{catalog_name}.{schema_name}.{table_name}: "

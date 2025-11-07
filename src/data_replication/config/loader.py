@@ -116,11 +116,6 @@ class ConfigLoader:
                             "reconciliation_config"
                         ]
 
-                    # Inherit uc_replication_config from replication group level
-                    if "uc_replication_config" in config_data:
-                        new_catalog["uc_replication_config"] = config_data[
-                            "uc_replication_config"
-                        ]
 
                     filtered_catalogs = [new_catalog]
 

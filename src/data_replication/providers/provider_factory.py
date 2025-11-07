@@ -35,7 +35,7 @@ class ProviderFactory:
     """
 
     # Valid operation types
-    VALID_OPERATIONS = {"backup", "replication", "reconciliation", "uc_replication"}
+    VALID_OPERATIONS = {"backup", "replication", "reconciliation"}
 
     def __init__(
         self,
@@ -108,10 +108,6 @@ class ProviderFactory:
             return bool(
                 catalog.reconciliation_config and catalog.reconciliation_config.enabled
             )
-        elif self._operation_type == "uc_replication":
-            return bool(
-                catalog.uc_replication_config and catalog.uc_replication_config.enabled
-            )
         return False
 
     def create_provider(self, catalog: TargetCatalogConfig) -> "BaseProvider":
@@ -132,10 +128,6 @@ class ProviderFactory:
             from .reconciliation_provider import ReconciliationProvider
 
             provider_class = ReconciliationProvider
-        elif self._operation_type == "uc_replication":
-            from .uc_replication_provider import UCReplicationProvider
-
-            provider_class = UCReplicationProvider
         else:
             raise ValueError(f"Unknown operation type: {self._operation_type}")
 
@@ -188,9 +180,9 @@ class ProviderFactory:
             table_info = (
                 f"{result.catalog_name}.{result.schema_name}.{result.object_name}"
             )
-            self.logger.info(
-                f"Operation {result.operation_type} {result.status} for {table_info}"
-            )
+            # self.logger.info(
+            #     f"Operation {result.operation_type} {result.status} for {table_info}"
+            # )
 
             # Log to audit table if AuditLogger is available
             if self.audit_logger:
@@ -473,13 +465,6 @@ class ProviderFactory:
             )
         return self.run_operations()
 
-    def run_uc_replication_operations(self) -> RunSummary:
-        """Run UC replication operations for all configured catalogs."""
-        if self._operation_type != "uc_replication":
-            raise ValueError(
-                "This factory is not configured for uc_replication operations"
-            )
-        return self.run_operations()
 
     # Factory methods for creating specific operation factories
     @classmethod
@@ -497,7 +482,3 @@ class ProviderFactory:
         """Factory method to create a reconciliation provider factory."""
         return cls("reconciliation", *args, **kwargs)
 
-    @classmethod
-    def create_uc_replication_factory(cls, *args, **kwargs) -> "ProviderFactory":
-        """Factory method to create a UC replication provider factory."""
-        return cls("uc_replication", *args, **kwargs)

@@ -17,27 +17,11 @@ class TableType(str, Enum):
     MANAGED = "managed"
     STREAMING_TABLE = "streaming_table"
     EXTERNAL = "external"
-
-
 class VolumeType(str, Enum):
     """Enumeration of supported volume types."""
 
     MANAGED = "managed"
     EXTERNAL = "external"
-
-
-class UCObjectType(str, Enum):
-    """Enumeration of Unity Catalog object types for metadata replication."""
-
-    CATALOG = "catalog"
-    SCHEMA = "schema"
-    TABLE_TAGS = "table_tags"
-    CATALOG_TAGS = "catalog_tags" 
-    SCHEMA_TAGS = "schema_tags"
-    SQL_VIEWS = "sql_views"
-    VOLUMES = "volumes"
-
-
 class ExecuteAt(str, Enum):
     """Enumeration of execution locations for operations."""
 
@@ -204,19 +188,6 @@ class ReconciliationConfig(BaseModel):
         return v.lower() if v else v
 
 
-class UCReplicationConfig(BaseModel):
-    """Configuration for Unity Catalog metadata replication operations."""
-
-    enabled: Optional[bool] = None
-    source_catalog: Optional[str] = None
-    uc_object_types: Optional[List[UCObjectType]] = None
-
-    @field_validator("source_catalog")
-    @classmethod
-    def validate_catalog_names(cls, v):
-        """Convert catalog names to lowercase."""
-        return v.lower() if v else v
-
 
 class TargetCatalogConfig(BaseModel):
     """Configuration for target catalogs."""
@@ -229,7 +200,6 @@ class TargetCatalogConfig(BaseModel):
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
-    uc_replication_config: Optional[UCReplicationConfig] = None
 
     @field_validator("catalog_name")
     @classmethod
@@ -296,7 +266,6 @@ class ReplicationSystemConfig(BaseModel):
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
-    uc_replication_config: Optional[UCReplicationConfig] = None
     target_catalogs: List[TargetCatalogConfig]
     external_location_mapping: Optional[dict] = None
     concurrency: Optional[ConcurrencyConfig] = Field(default_factory=ConcurrencyConfig)
@@ -429,30 +398,6 @@ class ReplicationSystemConfig(BaseModel):
 
         return self
 
-    @model_validator(mode="after")
-    def set_uc_replication_defaults(self):
-        """Merge catalog-level UC replication configs into system-level config"""
-        for catalog in self.target_catalogs:
-            if catalog.uc_replication_config:
-                # Merge system-level config into catalog config (catalog takes precedence)
-                if self.uc_replication_config:
-                    system_dict = self.uc_replication_config.model_dump()
-                    catalog_dict = catalog.uc_replication_config.model_dump()
-
-                    # Merge: system values as base, catalog values override
-                    merged_dict = {
-                        **system_dict,
-                        **{k: v for k, v in catalog_dict.items() if v is not None},
-                    }
-                    catalog.uc_replication_config = UCReplicationConfig(**merged_dict)
-                # If no system config, catalog config stays as is
-            else:
-                if self.uc_replication_config:
-                    catalog.uc_replication_config = UCReplicationConfig(
-                        **self.uc_replication_config.model_dump()
-                    )
-
-        return self
 
     @model_validator(mode="after")
     def substitute_variables(self):
@@ -495,7 +440,6 @@ class ReplicationSystemConfig(BaseModel):
             replace_in_object(catalog.backup_config, catalog.catalog_name)
             replace_in_object(catalog.replication_config, catalog.catalog_name)
             replace_in_object(catalog.reconciliation_config, catalog.catalog_name)
-            replace_in_object(catalog.uc_replication_config, catalog.catalog_name)
             # print(catalog)
 
         return self
@@ -596,11 +540,6 @@ class ReplicationSystemConfig(BaseModel):
                         f"{catalog.catalog_name}_from_{source_name}"
                     )
 
-            # Derive default UC replication source catalogs
-            if catalog.uc_replication_config and catalog.uc_replication_config.enabled:
-                if catalog.uc_replication_config.source_catalog is None:
-                    catalog.uc_replication_config.source_catalog = catalog.catalog_name
-
         return self
 
     @model_validator(mode="after")
@@ -613,10 +552,9 @@ class ReplicationSystemConfig(BaseModel):
                 catalog.backup_config is None
                 and catalog.replication_config is None
                 and catalog.reconciliation_config is None
-                and catalog.uc_replication_config is None
             ):
                 raise ValueError(
-                    f"At least one of backup_config, replication_config, reconciliation_config, or uc_replication_config must be provided in catalog: {catalog.catalog_name}"
+                    f"At least one of backup_config, replication_config, or reconciliation_config must be provided in catalog: {catalog.catalog_name}"
                 )
 
             if catalog.backup_config:
@@ -633,11 +571,6 @@ class ReplicationSystemConfig(BaseModel):
                 if catalog.reconciliation_config.enabled is None:
                     raise ValueError(
                         f"Reconciliation 'enabled' must be set in catalog: {catalog.catalog_name}"
-                    )
-            if catalog.uc_replication_config:
-                if catalog.uc_replication_config.enabled is None:
-                    raise ValueError(
-                        f"UC replication 'enabled' must be set in catalog: {catalog.catalog_name}"
                     )
 
             if (catalog.table_types is None or len(catalog.table_types) == 0) and (
