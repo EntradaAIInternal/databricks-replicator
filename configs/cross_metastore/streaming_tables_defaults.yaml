@@ -1,3 +1,4 @@
+# cli: data-replicator configs/cross_metastore/streaming_tables_defaults.yaml --target-catalog [catalog_name]
 # 1. Create delta share infrastructure in this tool including backup catalog, recipient, shares and shared catalogs with default system generated names.
 # 2. Export of source Streaming table backing table as delta table into backup catalog and share.
 # 3. Deep clone backup delta table into target Streaming table backing table.
@@ -26,6 +27,7 @@ target_databricks_connect_config:
 audit_config:
   audit_table: "data_replication.audit.audit_logging"
 
+uc_object_types: ["table_tag"]
 table_types: ["streaming_table"]
 backup_config:
   enabled: true

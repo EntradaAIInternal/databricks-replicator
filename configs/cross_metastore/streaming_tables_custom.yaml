@@ -1,3 +1,4 @@
+# cli: data-replicator configs/cross_metastore/streaming_tables_custom.yaml --target-catalog [catalog_name]
 # 1. BYO delta share infrastructure. recipient, shares and catalogs are created outside of this tool.
 # 2. Backup with existing backup catalog and share names.
 # 3. Replication from existing shared catalog.
@@ -29,12 +30,13 @@ audit_config:
 
 target_catalogs:
   - catalog_name: "aaron"
+    uc_object_types: ["table_tag"]
     table_types: ["streaming_table"]
     target_schemas:
       - schema_name: "bronze_1"
     backup_config:
       enabled: true
-      share_name: "aaron"
+      share_name: "aaron_share"
       backup_catalog: "aaron_dr"
       backup_share_name: "aaron_dr_azure"
     replication_config:
@@ -43,8 +45,6 @@ target_catalogs:
     reconciliation_config:
       enabled: true
       source_catalog: aaron_azure_shared
-      recon_outputs_catalog: aaron_azure_shared_recon_results
-      recon_outputs_schema: recon_outputs
 
 concurrency:
   max_workers: 5

@@ -11,13 +11,25 @@ from functools import wraps
 from typing import Optional
 
 from databricks.connect import DatabricksSession
-
+from databricks.sdk import WorkspaceClient
 from .audit.logger import DataReplicationLogger
-from .config.models import RetryConfig
+from .config.models import RetryConfig, SecretConfig
 
 
-def create_spark_session(host, token, cluster_id) -> DatabricksSession:
+
+def create_spark_session(
+    host: str,
+    secret_config: SecretConfig,
+    cluster_id: str,
+    workspace_client: WorkspaceClient,
+) -> DatabricksSession:
     """Create a Databricks Spark session using the provided host and token."""
+    token = None
+    if secret_config:
+        token = workspace_client.dbutils.secrets.get(
+            secret_config.secret_scope,
+            secret_config.secret_key,
+        )
     if host and token:
         os.environ["DATABRICKS_HOST"] = host
         os.environ["DATABRICKS_TOKEN"] = token
@@ -36,9 +48,11 @@ def validate_spark_session(spark: DatabricksSession, workspace_url: str) -> bool
     spark_workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
     return spark_workspace_url == workspace_url
 
+
 def get_workspace_url_from_host(host: str) -> str:
     """Extract the workspace URL from the host."""
     return host.replace("https://", "").replace("http://", "").split("/")[0]
+
 
 def retry_with_logging(
     retry_config: RetryConfig, logger: Optional[DataReplicationLogger] = None

@@ -1,3 +1,4 @@
+# cli: data-replicator configs/cross_metastore/recon_tables_defaults.yaml --target-catalog [catalog_name] -o reconciliation
 # 1. Recon all table types
 # 2. Create shared catalog with default system generated name from default system generated shared name
 

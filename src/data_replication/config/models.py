@@ -17,17 +17,36 @@ class TableType(str, Enum):
     MANAGED = "managed"
     STREAMING_TABLE = "streaming_table"
     EXTERNAL = "external"
+
+
 class VolumeType(str, Enum):
     """Enumeration of supported volume types."""
 
     MANAGED = "managed"
     EXTERNAL = "external"
+
+
 class ExecuteAt(str, Enum):
     """Enumeration of execution locations for operations."""
 
     SOURCE = "source"
     TARGET = "target"
     EXTERNAL = "external"
+
+
+class UCObjectType(str, Enum):
+    """Enumeration of Unity Catalog object types for replication."""
+
+    CATALOG = "catalog"
+    CATALOG_TAG = "catalog_tag"
+    SCHEMA = "schema"
+    SCHEMA_TAG = "schema_tag"
+    VIEW = "view"
+    VIEW_TAG = "view_tag"
+    VOLUME = "volume"
+    VOLUME_TAG = "volume_tag"
+    TABLE_TAG = "table_tag"
+    COLUMN_TAG = "column_tag"
 
 
 class SecretConfig(BaseModel):
@@ -139,16 +158,20 @@ class ReplicationConfig(BaseModel):
     """Configuration for replication operations."""
 
     enabled: Optional[bool] = None
+    replicate_data: Optional[bool] = True
+    replicate_uc: Optional[bool] = True
     create_target_catalog: Optional[bool] = False
     target_catalog_location: Optional[str] = None
     create_shared_catalog: Optional[bool] = False
     share_name: Optional[str] = None
     source_catalog: Optional[str] = None
+    original_source_catalog: Optional[str] = None
     create_intermediate_catalog: Optional[bool] = False
     intermediate_catalog: Optional[str] = None
     intermediate_catalog_location: Optional[str] = None
     enforce_schema: Optional[bool] = True
     copy_files: Optional[bool] = True
+    overwrite_tags: Optional[bool] = True
 
     @field_validator("source_catalog", "intermediate_catalog")
     @classmethod
@@ -188,14 +211,15 @@ class ReconciliationConfig(BaseModel):
         return v.lower() if v else v
 
 
-
 class TargetCatalogConfig(BaseModel):
     """Configuration for target catalogs."""
 
     catalog_name: str
     table_types: Optional[List[TableType]] = None
     volume_types: Optional[List[VolumeType]] = None
+    uc_object_types: Optional[List[UCObjectType]] = None
     target_schemas: Optional[List[SchemaConfig]] = None
+    exclude_schemas: Optional[List[SchemaConfig]] = None
     schema_filter_expression: Optional[str] = None
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
@@ -263,6 +287,7 @@ class ReplicationSystemConfig(BaseModel):
     audit_config: AuditConfig
     table_types: Optional[List[TableType]] = None
     volume_types: Optional[List[VolumeType]] = None
+    uc_object_types: Optional[List[UCObjectType]] = None
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
@@ -294,6 +319,14 @@ class ReplicationSystemConfig(BaseModel):
         for catalog in self.target_catalogs:
             if self.volume_types is not None and catalog.volume_types is None:
                 catalog.volume_types = self.volume_types
+        return self
+
+    @model_validator(mode="after")
+    def set_uc_object_types(self):
+        """Merge catalog-level UC object types into system-level config"""
+        for catalog in self.target_catalogs:
+            if self.uc_object_types is not None and catalog.uc_object_types is None:
+                catalog.uc_object_types = self.uc_object_types
         return self
 
     @model_validator(mode="after")
@@ -397,7 +430,6 @@ class ReplicationSystemConfig(BaseModel):
                     catalog.reconciliation_config.recon_outputs_schema = audit_schema
 
         return self
-
 
     @model_validator(mode="after")
     def substitute_variables(self):
@@ -525,6 +557,10 @@ class ReplicationSystemConfig(BaseModel):
                         if catalog.table_types == [TableType.STREAMING_TABLE]
                         else f"{catalog.catalog_name}_from_{source_name}"
                     )
+                if catalog.replication_config.original_source_catalog is None:
+                    catalog.replication_config.original_source_catalog = (
+                        catalog.catalog_name
+                    )
 
             # Derive default reconciliation catalogs
             if catalog.reconciliation_config and catalog.reconciliation_config.enabled:
@@ -548,6 +584,7 @@ class ReplicationSystemConfig(BaseModel):
         Validate catalog configuration including streaming table constraints.
         """
         for catalog in self.target_catalogs:
+            # Ensure at least one of backup, replication, or reconciliation is configured
             if (
                 catalog.backup_config is None
                 and catalog.replication_config is None
@@ -557,6 +594,7 @@ class ReplicationSystemConfig(BaseModel):
                     f"At least one of backup_config, replication_config, or reconciliation_config must be provided in catalog: {catalog.catalog_name}"
                 )
 
+            # Ensure 'enabled' is set for each configured operation
             if catalog.backup_config:
                 if catalog.backup_config.enabled is None:
                     raise ValueError(
@@ -573,12 +611,36 @@ class ReplicationSystemConfig(BaseModel):
                         f"Reconciliation 'enabled' must be set in catalog: {catalog.catalog_name}"
                     )
 
-            if (catalog.table_types is None or len(catalog.table_types) == 0) and (
-                catalog.volume_types is None or len(catalog.volume_types) == 0
+            # Ensure at least one object type is specified
+            if (
+                (catalog.table_types is None or len(catalog.table_types) == 0)
+                and (catalog.volume_types is None or len(catalog.volume_types) == 0)
+                and (
+                    catalog.uc_object_types is None or len(catalog.uc_object_types) == 0
+                )
             ):
                 raise ValueError(
-                    f"table_types or volume_types must be provided in catalog: {catalog.catalog_name}"
+                    f"at least one of table_types, uc_object_types and volume_types must be provided in catalog: {catalog.catalog_name}"
                 )
+            
+            # If volume_tag is specified, volume_types must be provided
+            if UCObjectType.VOLUME_TAG in (catalog.uc_object_types or []):
+                if catalog.volume_types is None or len(catalog.volume_types) == 0:
+                    raise ValueError(
+                        f"volume_types must be provided when volume_tag is included in uc_object_types in catalog: {catalog.catalog_name}"
+                    )
+            # If table_tag is specified, table_types must be provided
+            if UCObjectType.TABLE_TAG in (catalog.uc_object_types or []):
+                if catalog.table_types is None or len(catalog.table_types) == 0:
+                    raise ValueError(
+                        f"table_types must be provided when table_tag is included in uc_object_types in catalog: {catalog.catalog_name}"
+                    )
+            # If column_tag is specified, column_types must be provided
+            if UCObjectType.COLUMN_TAG in (catalog.uc_object_types or []):
+                if catalog.column_types is None or len(catalog.column_types) == 0:
+                    raise ValueError(
+                        f"column_types must be provided when column_tag is included in uc_object_types in catalog: {catalog.catalog_name}"
+                    )
 
             # Ensure only one of schema_filter_expression or target_schemas is provided
             if catalog.schema_filter_expression and catalog.target_schemas:
@@ -596,7 +658,11 @@ class ReplicationSystemConfig(BaseModel):
             )
 
             # Streaming tables can't be backed up and replicated with other object types
-            if has_streaming_table and has_other_table_types:
+            if (
+                catalog.replication_config.replicate_data
+                and has_streaming_table
+                and has_other_table_types
+            ):
                 if (catalog.backup_config and catalog.backup_config.enabled) or (
                     catalog.replication_config and catalog.replication_config.enabled
                 ):
@@ -610,6 +676,7 @@ class ReplicationSystemConfig(BaseModel):
             if (
                 not has_streaming_table
                 and catalog.backup_config
+                and catalog.backup_config.enabled
                 and catalog.backup_config.backup_catalog
             ):
                 raise ValueError(

@@ -1,3 +1,4 @@
+# cli: data-replicator configs/cross_metastore/delta_tables_custom.yaml --target-catalog [catalog_name]
 # 1. BYO delta share infrastructure. recipient, shares and catalogs are created outside of this tool.
 # 2. Backup with existing backup catalog and share names.
 # 3. Replication from existing shared catalog.
@@ -30,6 +31,7 @@ external_location_mapping:
 audit_config:
   audit_table: "data_replication.audit.audit_logging"
 
+uc_object_types: ["table_tag"]
 table_types: ["external", "managed"]
 backup_config:
   enabled: true

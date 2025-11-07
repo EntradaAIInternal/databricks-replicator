@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional, Type
 
 from databricks.connect import DatabricksSession
-
+from databricks.sdk import WorkspaceClient
 from ..audit.audit_logger import AuditLogger
 from ..audit.logger import DataReplicationLogger
 from ..config.models import (
@@ -43,6 +43,7 @@ class ProviderFactory:
         config: ReplicationSystemConfig,
         spark: DatabricksSession,
         logging_spark: DatabricksSession,
+        workspace_client: WorkspaceClient,
         logger: DataReplicationLogger,
         run_id: Optional[str] = None,
     ):
@@ -67,6 +68,7 @@ class ProviderFactory:
         self.config = config
         self.spark = spark
         self.logging_spark = logging_spark
+        self.workspace_client = workspace_client
         self.logger = logger
         self.run_id = run_id or str(uuid.uuid4())
         self.db_ops = DatabricksOperations(spark)
@@ -149,6 +151,7 @@ class ProviderFactory:
             self.spark,
             self.logger,
             self.db_ops,
+            self.workspace_client,
             self.run_id,
             catalog,
             self.config.source_databricks_connect_config,
@@ -465,7 +468,6 @@ class ProviderFactory:
             )
         return self.run_operations()
 
-
     # Factory methods for creating specific operation factories
     @classmethod
     def create_backup_factory(cls, *args, **kwargs) -> "ProviderFactory":
@@ -481,4 +483,3 @@ class ProviderFactory:
     def create_reconciliation_factory(cls, *args, **kwargs) -> "ProviderFactory":
         """Factory method to create a reconciliation provider factory."""
         return cls("reconciliation", *args, **kwargs)
-

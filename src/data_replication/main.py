@@ -104,7 +104,7 @@ def validate_args(args) -> None:
 
 
 def run_backup(
-    config, logger, logging_spark, run_id: str, w: WorkspaceClient
+    config, logger, logging_spark, run_id: str, workspace_client: WorkspaceClient
 ) -> int:
     """Run only backup operations."""
     if config.audit_config.logging_workspace == "source":
@@ -112,15 +112,12 @@ def run_backup(
     else:
         # Create source Spark session
         source_host = config.source_databricks_connect_config.host
-        source_token = None
+        source_secret_config = config.source_databricks_connect_config.token
         source_cluster_id = config.source_databricks_connect_config.cluster_id
-        if config.source_databricks_connect_config.token:
-            source_token = w.dbutils.secrets.get(
-                config.source_databricks_connect_config.token.secret_scope,
-                config.source_databricks_connect_config.token.secret_key,
-            )
         # create and validate Spark sessions
-        spark = create_spark_session(source_host, source_token, source_cluster_id)
+        spark = create_spark_session(
+            source_host, source_secret_config, source_cluster_id, workspace_client
+        )
         if not validate_spark_session(spark, get_workspace_url_from_host(source_host)):
             logger.error(
                 "Spark session is not connected to the configured source workspace"
@@ -130,7 +127,7 @@ def run_backup(
             )
 
     backup_factory = ProviderFactory(
-        "backup", config, spark, logging_spark, logger, run_id
+        "backup", config, spark, logging_spark, workspace_client, logger, run_id
     )
     summary = backup_factory.run_backup_operations()
 
@@ -143,7 +140,7 @@ def run_backup(
 
 
 def run_replication(
-    config, logger, logging_spark, run_id: str, w: WorkspaceClient
+    config, logger, logging_spark, run_id: str, workspace_client: WorkspaceClient
 ) -> int:
     """Run only replication operations."""
     if config.audit_config.logging_workspace == "target":
@@ -151,14 +148,11 @@ def run_replication(
     else:
         # Create target Spark session
         target_host = config.target_databricks_connect_config.host
-        target_token = None
+        target_secret_config = config.target_databricks_connect_config.token
         target_cluster_id = config.target_databricks_connect_config.cluster_id
-        if config.target_databricks_connect_config.token:
-            target_token = w.dbutils.secrets.get(
-                config.target_databricks_connect_config.token.secret_scope,
-                config.target_databricks_connect_config.token.secret_key,
-            )
-        spark = create_spark_session(target_host, target_token, target_cluster_id)
+        spark = create_spark_session(
+            target_host, target_secret_config, target_cluster_id, workspace_client
+        )
         if not validate_spark_session(spark, get_workspace_url_from_host(target_host)):
             logger.error(
                 "Spark session is not connected to the configured target workspace"
@@ -168,7 +162,7 @@ def run_replication(
             )
 
     replication_factory = ProviderFactory(
-        "replication", config, spark, logging_spark, logger, run_id
+        "replication", config, spark, logging_spark, workspace_client, logger, run_id
     )
     summary = replication_factory.run_replication_operations()
 
@@ -181,7 +175,7 @@ def run_replication(
 
 
 def run_reconciliation(
-    config, logger, logging_spark, run_id: str, w: WorkspaceClient
+    config, logger, logging_spark, run_id: str, workspace_client: WorkspaceClient
 ) -> int:
     """Run only reconciliation operations."""
     if config.audit_config.logging_workspace == "target":
@@ -189,14 +183,11 @@ def run_reconciliation(
     else:
         # Create target Spark session
         target_host = config.target_databricks_connect_config.host
-        target_token = None
+        target_secret_config = config.target_databricks_connect_config.token
         target_cluster_id = config.target_databricks_connect_config.cluster_id
-        if config.target_databricks_connect_config.token:
-            target_token = w.dbutils.secrets.get(
-                config.target_databricks_connect_config.token.secret_scope,
-                config.target_databricks_connect_config.token.secret_key,
-            )
-        spark = create_spark_session(target_host, target_token, target_cluster_id)
+        spark = create_spark_session(
+            target_host, target_secret_config, target_cluster_id, workspace_client
+        )
         if not validate_spark_session(spark, get_workspace_url_from_host(target_host)):
             logger.error(
                 "Spark session is not connected to the configured target workspace"
@@ -206,7 +197,7 @@ def run_reconciliation(
             )
 
     reconciliation_factory = ProviderFactory(
-        "reconciliation", config, spark, logging_spark, logger, run_id
+        "reconciliation", config, spark, logging_spark, workspace_client, logger, run_id
     )
     summary = reconciliation_factory.run_reconciliation_operations()
 
@@ -219,8 +210,9 @@ def run_reconciliation(
     logger.info("All reconciliation operations completed successfully")
     return 0
 
-def main():
-    """Main entry point for data replication system."""
+
+def setup_argument_parser():
+    """Setup and configure the command line argument parser."""
     parser = argparse.ArgumentParser(
         description="Data Replication Tool for Databricks",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -269,6 +261,12 @@ def main():
         help="maximum number of concurrent tasks, default is 4",
     )
 
+    return parser
+
+
+def main():
+    """Main entry point for data replication system."""
+    parser = setup_argument_parser()
     args = parser.parse_args()
 
     # Validate command line arguments
@@ -312,29 +310,15 @@ def main():
 
         if config.audit_config.logging_workspace == "source":
             logging_host = config.source_databricks_connect_config.host
-            logging_token = (
-                w.dbutils.secrets.get(
-                    config.source_databricks_connect_config.token.secret_scope,
-                    config.source_databricks_connect_config.token.secret_key,
-                )
-                if config.source_databricks_connect_config.token
-                else None
-            )
+            logging_secret_config = config.source_databricks_connect_config.token
             logging_cluster_id = config.source_databricks_connect_config.cluster_id
         else:
             logging_host = config.target_databricks_connect_config.host
-            logging_token = (
-                w.dbutils.secrets.get(
-                    config.target_databricks_connect_config.token.secret_scope,
-                    config.target_databricks_connect_config.token.secret_key,
-                )
-                if config.target_databricks_connect_config.token
-                else None
-            )
+            logging_secret_config = config.target_databricks_connect_config.token
             logging_cluster_id = config.target_databricks_connect_config.cluster_id
 
         logging_spark = create_spark_session(
-            logging_host, logging_token, logging_cluster_id
+            logging_host, logging_secret_config, logging_cluster_id, w
         )
         logging_workspace_url = get_workspace_url_from_host(logging_host)
         if not validate_spark_session(logging_spark, logging_workspace_url):

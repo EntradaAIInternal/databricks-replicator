@@ -14,6 +14,7 @@ from typing import List, Optional, Tuple
 
 from databricks.connect import DatabricksSession
 from pyspark.sql.utils import AnalysisException
+from databricks.sdk import WorkspaceClient
 
 from ..audit.logger import DataReplicationLogger
 from ..config.models import (
@@ -42,6 +43,7 @@ class BaseProvider(ABC):
         spark: DatabricksSession,
         logger: DataReplicationLogger,
         db_ops: DatabricksOperations,
+        workspace_client: WorkspaceClient,
         run_id: str,
         catalog_config: TargetCatalogConfig,
         source_databricks_config: DatabricksConnectConfig,
@@ -67,6 +69,7 @@ class BaseProvider(ABC):
         self.spark = spark
         self.logger = logger
         self.db_ops = db_ops
+        self.workspace_client = workspace_client
         self.run_id = run_id
         self.catalog_config = catalog_config
         self.source_databricks_config = source_databricks_config
@@ -327,14 +330,26 @@ class BaseProvider(ABC):
                         table_name = future_to_table[future]
                         try:
                             result = future.result(timeout=self.timeout_seconds)
-                            results.append(result)
 
-                            if result.status != "success":
-                                self.logger.error(
-                                    f"Failed to process table "
-                                    f"{catalog_name}.{schema_name}.{table_name}: "
-                                    f"{result.error_message}"
-                                )
+                            # Handle case where process_table returns a list of results
+                            if isinstance(result, list):
+                                results.extend(result)
+                                # Check if any result in the list failed
+                                for single_result in result:
+                                    if single_result.status != "success":
+                                        self.logger.error(
+                                            f"Failed to process table "
+                                            f"{catalog_name}.{schema_name}.{table_name}: "
+                                            f"{single_result.error_message}"
+                                        )
+                            else:
+                                results.append(result)
+                                if result.status != "success":
+                                    self.logger.error(
+                                        f"Failed to process table "
+                                        f"{catalog_name}.{schema_name}.{table_name}: "
+                                        f"{result.error_message}"
+                                    )
 
                         except Exception as e:
                             result = self._handle_exception(
@@ -463,9 +478,16 @@ class BaseProvider(ABC):
             List of tuples containing schema names, table lists, and volume lists to process
         """
 
+        exclude_schema_names = set()
+        # Apply exclude_schemas filter if configured
+        if self.catalog_config.exclude_schemas:
+            exclude_schema_names = {
+                schema.schema_name for schema in self.catalog_config.exclude_schemas
+            }
+
         if self.catalog_config.target_schemas:
             # Use explicitly configured schemas
-            return [
+            target_schemas = [
                 (
                     schema.schema_name,
                     schema.tables or [],
@@ -480,6 +502,14 @@ class BaseProvider(ABC):
                 )
             ]
 
+            target_schemas = [
+                (schema_name, tables, volumes)
+                for schema_name, tables, volumes in target_schemas
+                if schema_name not in exclude_schema_names
+            ]
+
+            return target_schemas
+
         if self.catalog_config.schema_filter_expression:
             # Use schema filter expression
             schema_list = self.db_ops.get_schemas_by_filter(
@@ -489,6 +519,11 @@ class BaseProvider(ABC):
         else:
             # Process all schemas
             schema_list = self.db_ops.get_all_schemas(self.catalog_name)
+
+        # Apply exclude_schemas filter if configured
+        schema_list = [
+            schema for schema in schema_list if schema not in exclude_schema_names
+        ]
 
         return [(item, [], []) for item in schema_list]
 

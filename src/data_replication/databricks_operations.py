@@ -697,3 +697,22 @@ class DatabricksOperations:
             return True
         except Exception:
             return False
+
+    def get_table_tags(self, catalog_name, schema_name, table_name):
+        """
+        Get tags associated with a table.
+        """
+        tag_names_list = None
+        tag_maps_list = None
+        df = self.spark.sql(f"""
+            select collect_list(b.tag_name) as tag_names_list, collect_list(map(b.tag_name,b.tag_value)) as tag_maps_list 
+            from system.information_schema.tables as a inner join system.information_schema.table_tags as b 
+            on a.table_catalog=b.catalog_name and a.table_schema=b.schema_name and a.table_name=b.table_name
+            where a.table_name = '{table_name}' and a.table_schema = '{schema_name}' and a.table_catalog = '{catalog_name}'
+            group by a.table_catalog, a.table_schema, a.table_name
+            """)
+        if not df.isEmpty():
+            tag_names_list = df.collect()[0]["tag_names_list"]
+            tag_maps_list = df.collect()[0]["tag_maps_list"]
+
+        return tag_names_list, tag_maps_list
