@@ -112,6 +112,8 @@ backup_config:
 replication_config:
   # Mandatory at replication group level or catalog level: whether to replicate catalog.
   enabled: true
+  # Optional: wait for shares schemas to be visible in target workspace before replication starts. default is 60 seconds.
+  replication_wait_secs: 60
   # Optional: whether to replicate the catalog if it does not exist on target.default is false.
   create_target_catalog: false
   # Optional: target catalog location. default is None.

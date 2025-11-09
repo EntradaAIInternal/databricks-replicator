@@ -258,6 +258,14 @@ class BaseProvider(ABC):
             )
             results.append(result)
 
+        self._log_summary(
+            start_time,
+            results,
+            self.get_operation_name(),
+            self.catalog_config.catalog_name,
+            schema_name="ALL",
+        )
+
         return results
 
     def process_schema_concurrently(
@@ -419,6 +427,10 @@ class BaseProvider(ABC):
                 start_time,
             )
             results.append(result)
+
+        self._log_summary(
+            start_time, results, self.get_operation_name(), catalog_name, schema_name
+        )
 
         return results
 
@@ -604,3 +616,43 @@ class BaseProvider(ABC):
             volumes,
             self.catalog_config.volume_types,
         )
+
+    def _log_summary(
+        self,
+        start_time: datetime,
+        results: List[RunResult],
+        operation_type: str = "operation",
+        catalog_name: str = "",
+        schema_name: str = "",
+    ):
+        """
+        log a run summary at schema level.
+
+        Args:
+            start_time: Operation start time
+            results: List of operation results
+            operation_type: Type of operation (backup, replication, etc.)
+            error_message: Optional error message
+        """
+        end_time = datetime.now(timezone.utc)
+        duration = (end_time - start_time).total_seconds()
+
+        # Calculate summary statistics
+        successful_operations = sum(1 for r in results if r.status == "success")
+        total_operations = len(results)
+
+        success_rate = (
+            (successful_operations / total_operations * 100)
+            if total_operations > 0
+            else 0
+        )
+        summary_text = (
+            f"Catalog: {catalog_name}, Schema: {schema_name}\n"
+            f"{operation_type.title()} operation completed in {duration:.1f}s. "
+            f"Success rate: {successful_operations}/"
+            f"{total_operations} ({success_rate:.1f}%)"
+        )
+
+        self.logger.info(summary_text)
+
+        return None

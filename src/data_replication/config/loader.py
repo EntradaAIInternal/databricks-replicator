@@ -41,6 +41,7 @@ class ConfigLoader:
         table_types_override: list = None,
         volume_types_override: list = None,
         logging_level_override: str = None,
+        replication_wait_secs_override: int = None,
     ) -> ReplicationSystemConfig:
         """
         Load and validate configuration from a YAML file.
@@ -95,6 +96,15 @@ class ConfigLoader:
             except Exception as e:
                 raise ConfigurationError(
                     f"Invalid uc_object_types configuration: {e}"
+                ) from e
+
+        # Handle replication_wait_secs override
+        if replication_wait_secs_override is not None:
+            try:
+                config_data["replication_wait_secs"] = replication_wait_secs_override
+            except Exception as e:
+                raise ConfigurationError(
+                    f"Invalid replication_wait_secs configuration: {e}"
                 ) from e
 
         # Handle table_types override
@@ -281,13 +291,13 @@ class ConfigLoader:
 
                 # Get existing logging config or create default
                 existing_logging = config_data.get("logging", {})
-                
+
                 # Create logging config with level override
                 validated_logging = LoggingConfig(
                     level=logging_level_override.upper(),
                     format=existing_logging.get("format", "json"),
                     log_to_file=existing_logging.get("log_to_file", False),
-                    log_file_path=existing_logging.get("log_file_path")
+                    log_file_path=existing_logging.get("log_file_path"),
                 )
 
                 # Apply override to config data

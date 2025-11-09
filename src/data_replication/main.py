@@ -8,6 +8,7 @@ including backup, delta share, replication, reconciliation, and UC replication.
 
 import os
 import sys
+import time
 
 # Determine the parent directory of the current script for module imports
 EXECUTED_IN_WORKSPACE = False
@@ -325,6 +326,13 @@ def setup_argument_parser():
         help="Logging level. Acceptable values: DEBUG,INFO,WARNING,ERROR,CRITICAL",
     )
 
+    parser.add_argument(
+        "--replication-wait-secs",
+        type=int,
+        default=60,
+        help="Wait time for replication operations in seconds. Default is 60 seconds.",
+    )
+
     return parser
 
 
@@ -372,6 +380,7 @@ def main():
             table_types_override=table_types_override,
             volume_types_override=volume_types_override,
             logging_level_override=args.logging_level,
+            replication_wait_secs_override=args.replication_wait_secs,
         )
         logger = create_logger(config)
 
@@ -393,7 +402,9 @@ def main():
         else:
             logger.info("Running from Databricks environment")
 
-        logger.info(f"Connecting to default workspace {default_workspace_url} as user {default_user}")
+        logger.info(
+            f"Connecting to default workspace {default_workspace_url} as user {default_user}"
+        )
 
         if config.audit_config.logging_workspace == "source":
             logging_host = config.source_databricks_connect_config.host
@@ -445,6 +456,13 @@ def main():
                 logger.info("Backup disabled or No catalogs configured for backup")
 
         if args.operation in ["all", "replication"]:
+            # wait for shared schemas to be available in target workspace
+            replication_wait_secs = 60
+            if args.operation in ["all"]:
+                logger.info(
+                    f"Waiting {replication_wait_secs} seconds for Delta Share schemas to be available in target workspace"
+                )
+                time.sleep(replication_wait_secs)
             # Check if replication is configured
             replication_catalogs = [
                 cat

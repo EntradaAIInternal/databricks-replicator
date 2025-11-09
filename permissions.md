@@ -25,6 +25,13 @@
 - USE_SHARE, MODIFY_SHARE - backup_config.add_to_share
 ```
 
+### Logging (Source): if audit_config.logging_workspace = 'source'
+```
+- CREATE_CATALOG - audit_config.create_audit_catalog - required only if audit catalog needs creation
+- USE_CATALOG, CREATE_SCHEMA on audit catalog if not owner - required only if audit catalog needs creation
+- USE_CATALOG, USE_SCHEMA, SELECT, MODIFY, CREATE_TABLE on audit catalog if not owner
+```
+
 ## Minimum Permission Required for User/Service Principal at Target Workspace
 
 ### Delta Sharing Infra Setup (Target):
@@ -61,4 +68,12 @@
 - USE_CATALOG, USE_SCHEMA, SELECT, MODIFY, CREATE_TABLE on recon result catalog if not owner
 - USE_CATALOG, USE_SCHEMA, SELECT ON system.information_schema schema
 ```
+
+### Logging (Target): if audit_config.logging_workspace = 'target'
+```
+- CREATE_CATALOG - audit_config.create_audit_catalog - required only if audit catalog needs creation
+- USE_CATALOG, CREATE_SCHEMA on audit catalog if not owner - required only if audit catalog needs creation
+- USE_CATALOG, USE_SCHEMA, SELECT, MODIFY, CREATE_TABLE on audit catalog if not owner
+```
+
 This granular breakdown provides the specific permissions required for each Delta Sharing operation, avoiding the need for broad administrative roles.

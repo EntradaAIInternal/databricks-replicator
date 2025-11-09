@@ -157,6 +157,7 @@ class ReplicationConfig(BaseModel):
     """Configuration for replication operations."""
 
     enabled: Optional[bool] = None
+    replication_wait_secs: Optional[int] = 60
     create_target_catalog: Optional[bool] = False
     target_catalog_location: Optional[str] = None
     create_shared_catalog: Optional[bool] = False

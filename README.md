@@ -6,11 +6,7 @@ Cloud agnostic - cross metastore or same metastore replication
 
 ## Overview
 
-This system provides incremental data and UC metadata replication capabilities between Databricks env or within same env with D2D Delta Share and deep clone, with specialized handling for Streaming Tables. It supports multiple operation types that can be run independently or together:
-
-- **Backup**: Export Streaming Table backing tables and add delta tables to Share
-- **Replication**: Cross-metastore/same metastore incremental data and uc replication
-- **Reconciliation**: Data validation with row counts, schema checks, and missing data detection
+This system provides incremental data and UC metadata replication capabilities between Databricks env or within same env with D2D Delta Share and deep clone, with specialized handling for Streaming Tables. It supports multiple operation types that can be run independently or together.
 
 ## Supported Object Types
 - Streaming Tables (data only, no checkpoints)
@@ -29,14 +25,29 @@ This system provides incremental data and UC metadata replication capabilities b
 
 ## Unsupported Object Types
 - Materialized Views
+- Streaming table checkpoints
+
+## Supported Operation Types
+### Backup Operations - Export Streaming Table backing tables and add schema to Share
+- For ST, deep clones ST backing tables from source to backup catalogs.
+- For all object types, add containing schemas to share.
+
+### Replication Operations - Cross-metastore/same metastore incremental data and uc replication
+- Deep clone tables/volume files across workspaces from share with schema enforcement
+- Replicate UC metadata
+
+### Reconciliation Operations (Table only)
+- Row count validation
+- Schema structure comparison  
+- Missing data detection
 
 ## Key Features
 
 ### Delta Sharing
-Option to let the tool setup Delta share automatically for you, i.e. Recipient, Shares and Shared Catalogs. Or BYO Delta share infra
+Flexibility to let the tool setup Delta share infra automatically for you, i.e. Recipient, Shares and Shared Catalogs. Alternatively, BYO Delta share infra
 
 ### Incremental Data Replication
-The system leverages Deep Clone for incrementality
+The system leverages Deep Clone for incrementality and replication performance
 
 ### Streaming Table Handling
 The system automatically handles Streaming Tables complexities:
@@ -45,12 +56,17 @@ The system automatically handles Streaming Tables complexities:
 - Deep clone ST backing tables rather than ST tables directly
 
 ### UC Metadata Replication
-Export and import UC metadata including tags
+Export and import UC metadata including support for tags
 
 ### Run Anywhere
 - The tool can be executed in source, target workspace, or via external compute
 - The tool can be executed in cli, or deployed via DAB as workflow job
 
+### Flexible Configuration
+- YAML-based configuration with Pydantic validation
+- Hierarchical configuration with overrides, i.e. cli args -> yaml config file level -> yaml config catalog level
+- Catalog, schema and table flexible selective replication
+- Configurable concurrency and timeout settings
 
 ### Robust Logging & Error Handling
 - Configurable retry logic with exponential backoff
@@ -59,24 +75,39 @@ Export and import UC metadata including tags
 - All operations tracked in audit tables for monitoring and alerting
 - Print out all executed SQL in DEBUG mode for easy troubleshooting
 
-### Flexible Configuration
-- YAML-based configuration with Pydantic validation
-- CLI args to override YAML configuration
-- Catalog, schema and table flexible selective replication
-- Configurable concurrency and timeout settings
+### Logging Details
+Object level result details are recorded in configurable audit table location in either source or target workspace (default to target). Detailed execution log can be configured to store in json/txt in files
+#### Audit Log Table Schema
+| Column Name | Data Type | Description |
+|-------------|-----------|-------------|
+| run_id | STRING | Unique identifier for each execution run |
+| logging_time | TIMESTAMP | When the log entry was created |
+| operation_type | STRING | Type of operation (backup, replication, reconciliation) |
+| catalog_name | STRING | Target catalog name |
+| schema_name | STRING | Target schema name |
+| object_name | STRING | Target Object name |
+| object_type | STRING | Type of object (table, view, etc.) |
+| status | STRING | Operation status (success or failed) |
+| start_time | TIMESTAMP | Operation start time |
+| end_time | TIMESTAMP | Operation end time |
+| duration_seconds | DOUBLE | Operation duration in seconds |
+| error_message | STRING | Error message if operation failed |
+| details | STRING | Additional operation details in json string|
+| attempt_number | INT | Current retry attempt number |
+| max_attempts | INT | Maximum allowed retry attempts configured |
+| config_details | STRING | JSON serialized configuration details |
+| execution_user | STRING | User executing the operation |
 
-## Installation
-
-### Prerequisites
+## Prerequisites
 - User or Service Principal in source and target workspace created with metastore admin right. If metastore admin permission is not available, check <a href=./permissions.md>here</a> to apply more granular UC access control 
 - PAT or OAuth Token for user or sp created and stored in Databricks Key Vault. 
 **Note**: if this tool is run in source workspace, only target workspace token secrets need to be created in source. Conversely, if run in target workspace, source token needs to be created in target.
 - For cross-metastore replication, enable Delta Sharing (DS) including network connectivity https://docs.databricks.com/aws/en/delta-sharing/set-up#gsc.tab=0
 - Network connectivity from the tool to source or target workspace. e.g. if tool runs in source workspace, source data plane (outbound) should be able to establish connect to target workspace control plane (inbound). And vica versa.
 
-### Getting Started
+## Getting Started
 
-1. Install Databricks CLI
+1. Install the Databricks CLI from https://docs.databricks.com/dev-tools/cli/databricks-cli.html
 
 2. Setup dev env:
 ```bash
@@ -116,20 +147,6 @@ data-replicator <config.yaml> --operation replication --target-catalog catalog1
 data-replicator <config.yaml> --operation reconciliation --target-catalog catalog1
 ```
 
-### Operation Types
-#### Backup Operations
-- For ST, deep clones ST backing tables from source to backup catalogs.
-- For object types, add schemas to share.
-
-#### Replication Operations  
-- Deep clone tables/volume files across workspaces from share with schema enforcement
-- Replicate UC metadata
-
-#### Reconciliation Operations (Table only)
-- Row count validation
-- Schema structure comparison  
-- Missing data detection
-  
 ## Development
 ### Code Quality Tools
 ```bash

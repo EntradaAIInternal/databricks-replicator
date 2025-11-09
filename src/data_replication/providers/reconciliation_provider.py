@@ -8,14 +8,43 @@ row count validation, and missing data detection between source and target table
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from data_replication.databricks_operations import DatabricksOperations
+
 from ..config.models import RunResult
 from ..exceptions import ReconciliationError, TableNotFoundError
-from ..utils import retry_with_logging
+from ..utils import (
+    create_spark_session,
+    get_workspace_url_from_host,
+    retry_with_logging,
+    validate_spark_session,
+)
 from .base_provider import BaseProvider
 
 
 class ReconciliationProvider(BaseProvider):
     """Provider for reconciliation operations between source and target tables."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Setup source Spark session if create_shared_catalog is True but source_databricks_connect_config.sharing_identifier is not provided
+        if (
+            self.catalog_config.reconciliation_config
+            and self.catalog_config.reconciliation_config.create_shared_catalog
+            and not self.source_databricks_config.sharing_identifier
+        ):
+            source_host = self.source_databricks_config.host
+            source_secret_config = self.source_databricks_config.token
+            source_cluster_id = self.source_databricks_config.cluster_id
+            self.source_spark = create_spark_session(
+                host=source_host,
+                secret_config=source_secret_config,
+                cluster_id=source_cluster_id,
+                workspace_client=self.workspace_client,
+            )
+            validate_spark_session(
+                self.source_spark, get_workspace_url_from_host(source_host)
+            )
+            self.source_dbops = DatabricksOperations(self.source_spark, self.logger)
 
     def get_operation_name(self) -> str:
         """Get the name of the operation for logging purposes."""
@@ -57,9 +86,10 @@ class ReconciliationProvider(BaseProvider):
 
         # Create source catalog from share if needed
         if reconciliation_config.create_shared_catalog:
-            provider_name = self.db_ops.get_provider_name(
-                self.source_databricks_config.sharing_identifier
-            )
+            sharing_identifier = self.source_databricks_config.sharing_identifier
+            if not sharing_identifier:
+                sharing_identifier = self.source_dbops.get_metastore_id()
+            provider_name = self.db_ops.get_provider_name(sharing_identifier)
             self.logger.info(
                 f"""Creating source catalog from share: {reconciliation_config.source_catalog} using share name: {reconciliation_config.share_name}"""
             )
