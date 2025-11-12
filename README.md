@@ -9,32 +9,36 @@ Cloud agnostic - cross metastore or same metastore replication
 This system provides incremental data and UC metadata replication capabilities between Databricks env or within same env with D2D Delta Share and deep clone, with specialized handling for Streaming Tables. It supports multiple operation types that can be run independently or together.
 
 ## Supported Object Types
-- Streaming Tables (data only, no checkpoints)
-- Managed Table
-- External Table
+- Data Replication
+  - Streaming Tables (data only, no checkpoints)
+  - Managed Table
+  - External Table
 - UC metadata
-  - Table & Column Tags
+  - Tags (catalog, schema, table, columns, views, volume)
+  - Column Comments
   
 ## WIP
-- Volume Files
+- Data Replication
+  - Volume Files
 - UC metadata
-  - Catalog & Tags
-  - Schema & Tags
+  - Catalog
+  - Schema
   - Views
-  - Volume & Tags
+  - Volume
 
 ## Unsupported Object Types
 - Materialized Views
-- Streaming table checkpoints
+- Streaming checkpoints
 
 ## Supported Operation Types
 ### Backup Operations - Export Streaming Table backing tables and add schema to Share
 - For ST, deep clones ST backing tables from source to backup catalogs.
-- For all object types, add containing schemas to share.
+- For all table and volume types, add containing schemas to share.
+- Not required for uc metadata replication
 
 ### Replication Operations - Cross-metastore/same metastore incremental data and uc replication
-- Deep clone tables/volume files across workspaces from share with schema enforcement
-- Replicate UC metadata
+- Deep clone tables/volume files across workspaces from shared catalog with schema enforcement
+- Replicate UC metadata from source uc to target uc (not through delta share)
 
 ### Reconciliation Operations (Table only)
 - Row count validation
@@ -103,7 +107,8 @@ Object level result details are recorded in configurable audit table location in
 - PAT or OAuth Token for user or sp created and stored in Databricks Key Vault. 
 **Note**: if this tool is run in source workspace, only target workspace token secrets need to be created in source. Conversely, if run in target workspace, source token needs to be created in target.
 - For cross-metastore replication, enable Delta Sharing (DS) including network connectivity https://docs.databricks.com/aws/en/delta-sharing/set-up#gsc.tab=0
-- Network connectivity from the tool to source or target workspace. e.g. if tool runs in source workspace, source data plane (outbound) should be able to establish connect to target workspace control plane (inbound). And vica versa.
+- Network connectivity to source or target workspace. e.g. if tool runs in source workspace, source data plane (outbound) should be able to establish connect to target workspace control plane (inbound). And vica versa.
+**Note**: UC replication requires connect to both source and target workspace as delta share is not used.
 
 ## Getting Started
 

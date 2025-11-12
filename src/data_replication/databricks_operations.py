@@ -96,6 +96,34 @@ class DatabricksOperations:
         except Exception as e:
             raise Exception(f"Failed to get metastore ID: {str(e)}") from e
 
+    def if_catalog_exists(self, catalog_name: str) -> bool:
+        """
+        Check if catalog exists.
+
+        Args:
+            catalog_name: Name of the catalog to check
+        Returns:
+            True if catalog exists, False otherwise
+        """
+        try:
+            catalogs_df = self.spark.sql(f"SHOW CATALOGS LIKE '{catalog_name}'")
+            return not catalogs_df.isEmpty()
+        except Exception:
+            return False
+
+    def if_schema_exists(self, catalog_name: str, schema_name: str) -> bool:
+        """
+        Check if schema exists.
+
+        Args:
+            catalog_name: Name of the catalog
+            schema_name: Name of the schema to check
+        Returns:
+            True if catalog exists, False otherwise
+        """
+        schema_name = f"`{catalog_name}`.`{schema_name}`"
+        return self.spark.catalog.databaseExists(schema_name)
+
     def create_catalog_if_not_exists(
         self, catalog_name: str, catalog_location: str
     ) -> None:
@@ -318,6 +346,9 @@ class DatabricksOperations:
         return self.spark.catalog.tableExists(table_name)
 
     def get_table_type(self, table_name) -> str:
+        """
+        get the type of a table from shared catalog or normal catalog
+        """
         pipeline_id = None
         table_type = None
         # Refresh table metadata before checking if it exists
@@ -400,6 +431,16 @@ class DatabricksOperations:
         return table_details["properties"].get("pipelines.pipelineId", None)
 
     def get_table_details(self, table_name: str) -> Tuple[str, bool]:
+        """
+        Get actual table name, whether it's a DLT table, and pipeline ID.
+        Args:
+            table_name: Full table name (catalog.schema.table)
+        Returns:
+        Dictionary with keys:
+            - table_name: Actual table name to use for deep clone
+            - is_dlt: Boolean indicating if it's a DLT table
+            - pipeline_id: Pipeline ID if applicable, else None
+        """
         if self.spark.catalog.tableExists(table_name):
             pipeline_id = self.get_pipeline_id(table_name)
             if pipeline_id:
@@ -693,6 +734,22 @@ class DatabricksOperations:
         except Exception as e:
             raise Exception(f"""Failed to get provider name: {str(e)}""") from e
 
+    def if_volume_exists(self, volume_name: str) -> bool:
+        """
+        Check if volume exists.
+
+        Args:
+            volume_name: Full volume name (catalog.schema.volume)
+        Returns:
+            True if vollume exists, False otherwise
+        """
+        try:
+            # Check if volume exists by attempting to describe it
+            self.spark.sql(f"DESCRIBE VOLUME {volume_name}")
+            return True
+        except Exception:
+            return False
+
     def get_volumes_in_schema(self, catalog_name: str, schema_name: str) -> List[str]:
         """
         Get all volumes in a schema.
@@ -792,6 +849,44 @@ class DatabricksOperations:
         except Exception:
             return False
 
+    def get_catalog_tags(self, catalog_name):
+        """
+        Get tags associated with a catalog.
+        """
+        tag_names_list = None
+        tag_maps_list = None
+        df = self.spark.sql(f"""
+            select collect_list(b.tag_name) as tag_names_list, collect_list(map(b.tag_name,b.tag_value)) as tag_maps_list 
+            from system.information_schema.catalogs as a inner join system.information_schema.catalog_tags as b 
+            on a.catalog_name=b.catalog_name
+            where a.catalog_name = '{catalog_name}'
+            group by a.catalog_name
+            """)
+        if not df.isEmpty():
+            tag_names_list = df.collect()[0]["tag_names_list"]
+            tag_maps_list = df.collect()[0]["tag_maps_list"]
+
+        return tag_names_list, tag_maps_list
+
+    def get_schema_tags(self, catalog_name, schema_name):
+        """
+        Get tags associated with a schema.
+        """
+        tag_names_list = None
+        tag_maps_list = None
+        df = self.spark.sql(f"""
+            select collect_list(b.tag_name) as tag_names_list, collect_list(map(b.tag_name,b.tag_value)) as tag_maps_list 
+            from system.information_schema.schemata as a inner join system.information_schema.schema_tags as b 
+            on a.catalog_name=b.catalog_name and a.schema_name=b.schema_name
+            where a.schema_name = '{schema_name}' and a.catalog_name = '{catalog_name}'
+            group by a.catalog_name, a.schema_name
+            """)
+        if not df.isEmpty():
+            tag_names_list = df.collect()[0]["tag_names_list"]
+            tag_maps_list = df.collect()[0]["tag_maps_list"]
+
+        return tag_names_list, tag_maps_list
+
     def get_table_tags(self, catalog_name, schema_name, table_name):
         """
         Get tags associated with a table.
@@ -810,3 +905,49 @@ class DatabricksOperations:
             tag_maps_list = df.collect()[0]["tag_maps_list"]
 
         return tag_names_list, tag_maps_list
+
+    def get_volume_tags(self, catalog_name, schema_name, volume_name):
+        """
+        Get tags associated with a volume.
+        """
+        tag_names_list = None
+        tag_maps_list = None
+        df = self.spark.sql(f"""
+            select collect_list(b.tag_name) as tag_names_list, collect_list(map(b.tag_name,b.tag_value)) as tag_maps_list 
+            from system.information_schema.volumes as a inner join system.information_schema.volume_tags as b 
+            on a.volume_catalog=b.catalog_name and a.volume_schema=b.schema_name and a.volume_name=b.volume_name
+            where a.volume_name = '{volume_name}' and a.volume_schema = '{schema_name}' and a.volume_catalog = '{catalog_name}'
+            group by a.volume_catalog, a.volume_schema, a.volume_name
+            """)
+        if not df.isEmpty():
+            tag_names_list = df.collect()[0]["tag_names_list"]
+            tag_maps_list = df.collect()[0]["tag_maps_list"]
+
+        return tag_names_list, tag_maps_list
+
+    def get_column_tags_df(self, catalog_name, schema_name, table_name):
+        """
+        Get tags associated with columns of a table.
+        """
+
+        df = self.spark.sql(f"""
+            select a.table_catalog, a.table_schema, a.table_name,a.column_name, 
+            collect_list(b.tag_name) as tag_names_list, collect_list(map(b.tag_name,b.tag_value)) as tag_maps_list 
+            from system.information_schema.columns as a inner join system.information_schema.column_tags as b 
+            on a.table_catalog=b.catalog_name and a.table_schema=b.schema_name and a.table_name=b.table_name and a.column_name=b.column_name
+            where a.table_name = '{table_name}' and a.table_schema = '{schema_name}' and a.table_catalog = '{catalog_name}'
+            group by a.table_catalog, a.table_schema, a.table_name,a.column_name
+            """)
+
+        return df
+
+    def get_column_comments(self, catalog_name, schema_name, table_name):
+        """
+        Get comments associated with columns of a table.
+        """
+        comment_maps_list = self.spark.sql(f"""
+            select collect_list(map(column_name,comment))as comment_maps_list from system.information_schema.columns
+            where table_catalog = '{catalog_name}' and table_schema = '{schema_name}' and table_name = '{table_name}'
+            group by table_catalog, table_catalog, table_name""").collect()[0][0]
+
+        return comment_maps_list

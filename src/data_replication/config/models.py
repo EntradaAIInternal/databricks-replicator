@@ -45,8 +45,8 @@ class UCObjectType(str, Enum):
     VOLUME_TAG = "volume_tag"
     TABLE_TAG = "table_tag"
     COLUMN_TAG = "column_tag"
+    COLUMN_COMMENT = "column_comment"
     ALL = "all"
-
 
 class SecretConfig(BaseModel):
     """Configuration for Databricks secrets."""
@@ -157,18 +157,18 @@ class ReplicationConfig(BaseModel):
     """Configuration for replication operations."""
 
     enabled: Optional[bool] = None
-    replication_wait_secs: Optional[int] = 60
     create_target_catalog: Optional[bool] = False
     target_catalog_location: Optional[str] = None
     create_shared_catalog: Optional[bool] = False
     share_name: Optional[str] = None
     source_catalog: Optional[str] = None
-    original_source_catalog: Optional[str] = None
     create_intermediate_catalog: Optional[bool] = False
     intermediate_catalog: Optional[str] = None
     intermediate_catalog_location: Optional[str] = None
     enforce_schema: Optional[bool] = True
     overwrite_tags: Optional[bool] = True
+    overwrite_comments: Optional[bool] = True
+    copy_files: Optional[bool] = True
 
     @field_validator("source_catalog", "intermediate_catalog")
     @classmethod
@@ -538,27 +538,30 @@ class ReplicationSystemConfig(BaseModel):
 
             # Derive default replication catalogs
             if catalog.replication_config and catalog.replication_config.enabled:
-                if (
-                    catalog.replication_config.create_shared_catalog
-                    and catalog.replication_config.share_name is None
-                ):
-                    catalog.replication_config.share_name = (
-                        (
-                            f"__replication_internal_{catalog.catalog_name}_to_{target_name}_share"
+
+                # for uc replication, default source_catalog is the same as target catalog_name
+                if catalog.uc_object_types and len(catalog.uc_object_types) > 0:
+                    if catalog.replication_config.source_catalog is None:
+                        catalog.replication_config.source_catalog = catalog.catalog_name
+                else:
+                # for table/volume replication, derive defaults shared catalogs
+                    if (
+                        catalog.replication_config.create_shared_catalog
+                        and catalog.replication_config.share_name is None
+                    ):
+                        catalog.replication_config.share_name = (
+                            (
+                                f"__replication_internal_{catalog.catalog_name}_to_{target_name}_share"
+                            )
+                            if catalog.table_types and catalog.table_types == [TableType.STREAMING_TABLE]
+                            else (f"{catalog.catalog_name}_to_{target_name}_share")
                         )
-                        if catalog.table_types and catalog.table_types == [TableType.STREAMING_TABLE]
-                        else (f"{catalog.catalog_name}_to_{target_name}_share")
-                    )
-                if catalog.replication_config.source_catalog is None:
-                    catalog.replication_config.source_catalog = (
-                        f"__replication_internal_{catalog.catalog_name}_from_{source_name}"
-                        if catalog.table_types and catalog.table_types == [TableType.STREAMING_TABLE]
-                        else f"{catalog.catalog_name}_from_{source_name}"
-                    )
-                if catalog.replication_config.original_source_catalog is None:
-                    catalog.replication_config.original_source_catalog = (
-                        catalog.catalog_name
-                    )
+                    if catalog.replication_config.source_catalog is None:
+                        catalog.replication_config.source_catalog = (
+                            f"__replication_internal_{catalog.catalog_name}_from_{source_name}"
+                            if catalog.table_types and catalog.table_types == [TableType.STREAMING_TABLE]
+                            else f"{catalog.catalog_name}_from_{source_name}"
+                        )
 
             # Derive default reconciliation catalogs
             if catalog.reconciliation_config and catalog.reconciliation_config.enabled:
@@ -609,16 +612,18 @@ class ReplicationSystemConfig(BaseModel):
                         f"Reconciliation 'enabled' must be set in catalog: {catalog.catalog_name}"
                     )
 
-            # Ensure at least one object type is specified
-            if (
-                (catalog.table_types is None or len(catalog.table_types) == 0)
-                and (catalog.volume_types is None or len(catalog.volume_types) == 0)
-                and (
-                    catalog.uc_object_types is None or len(catalog.uc_object_types) == 0
-                )
-            ):
+            # Ensure only one object type is specified
+            object_types_provided = []
+            if catalog.table_types is not None and len(catalog.table_types) > 0:
+                object_types_provided.append("table_types")
+            if catalog.volume_types is not None and len(catalog.volume_types) > 0:
+                object_types_provided.append("volume_types")
+            if catalog.uc_object_types is not None and len(catalog.uc_object_types) > 0:
+                object_types_provided.append("uc_object_types")
+
+            if len(object_types_provided) != 1:
                 raise ValueError(
-                    f"at least one of table_types, uc_object_types and volume_types must be provided in catalog: {catalog.catalog_name}"
+                    f"exactly one of table_types, uc_object_types and volume_types must be provided in catalog: {catalog.catalog_name}"
                 )
 
             # Ensure only one of schema_filter_expression or target_schemas is provided

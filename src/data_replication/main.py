@@ -183,6 +183,7 @@ def run_replication(
     config, logger, logging_spark, run_id: str, workspace_client: WorkspaceClient
 ) -> int:
     """Run only replication operations."""
+
     if config.audit_config.logging_workspace == "target":
         spark = logging_spark
     else:
@@ -380,7 +381,6 @@ def main():
             table_types_override=table_types_override,
             volume_types_override=volume_types_override,
             logging_level_override=args.logging_level,
-            replication_wait_secs_override=args.replication_wait_secs,
         )
         logger = create_logger(config)
 
@@ -456,9 +456,9 @@ def main():
                 logger.info("Backup disabled or No catalogs configured for backup")
 
         if args.operation in ["all", "replication"]:
-            # wait for shared schemas to be available in target workspace
-            replication_wait_secs = 60
-            if args.operation in ["all"]:
+            # wait for shared schemas to be available in target workspace for non-UC metedata replication
+            replication_wait_secs = args.replication_wait_secs if args.replication_wait_secs else 60
+            if args.operation in ["all"] and not args.uc_object_types and not config.uc_object_types:
                 logger.info(
                     f"Waiting {replication_wait_secs} seconds for Delta Share schemas to be available in target workspace"
                 )

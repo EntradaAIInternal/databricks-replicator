@@ -2,16 +2,18 @@
 
 ### Delta Sharing Infra Setup (Source):
 ```
-- CREATE_SHARE, USE_SHARE - backup_config.create_share
-- CREATE_RECIPIENT - backup_config.create_recipient
+- CREATE_SHARE - for creating share. controlled by backup_config.create_share
+- CREATE_RECIPIENT - for creating recipient. controlled by backup_config.create_recipient
+- USE_SHARE, SET SHARE PERMISSION - if share already exists, for granting share to recipient
+- USE_RECIPIENT - if recipient already exists, for granting share to recipient
 - USE_CATALOG, USE_SCHEMA, SELECT ON system.information_schema schema
 ```
 
 ### Data Replication (Source):
 ```
-- USE_CATALOG, USE_SCHEMA, SELECT, READ_VOLUME on shared catalogs
+- USE_CATALOG, USE_SCHEMA, SELECT, READ_VOLUME on source catalogs
 - USE_CATALOG, USE_SCHEMA, SELECT ON system.information_schema schema
-- USE_SHARE, MODIFY_SHARE - backup_config.add_to_share
+- SHARE OWNER - ONLY share owner can add schema to share. controlled by backup_config.add_to_share.
 - CREATE_CATALOG - backup_config.create_backup_catalog - required for streaming table only 
 - USE_CATALOG, CREATE_SCHEMA on backup catalog if not owner - required for streaming table only 
 - USE_CATALOG, USE_SCHEMA, SELECT, MODIFY, CREATE_TABLE on backup catalog if not owner - required for streaming table only 
@@ -20,7 +22,7 @@
 
 ### UC Replication (Source):
 ```
-- USE_CATALOG, USE_SCHEMA, SELECT, READ_VOLUME on shared catalogs
+- USE_CATALOG, USE_SCHEMA, SELECT, READ_VOLUME on source catalogs
 - USE_CATALOG, USE_SCHEMA, SELECT ON system.information_schema schema
 - USE_SHARE, MODIFY_SHARE - backup_config.add_to_share
 ```

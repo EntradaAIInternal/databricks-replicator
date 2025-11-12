@@ -16,7 +16,6 @@ from .audit.logger import DataReplicationLogger
 from .config.models import RetryConfig, SecretConfig
 
 
-
 def create_spark_session(
     host: str,
     secret_config: SecretConfig,
@@ -42,14 +41,17 @@ def create_spark_session(
     spark = DatabricksSession.builder.serverless(True).getOrCreate()
     return spark
 
+
 def get_spark_workspace_url(spark: DatabricksSession) -> str:
     """Get the workspace URL from the Spark session configuration."""
     return spark.conf.get("spark.databricks.workspaceUrl")
+
 
 def validate_spark_session(spark: DatabricksSession, workspace_url: str) -> bool:
     """Validate if the Spark session is connected to the right Databricks workspace."""
     spark_workspace_url = get_spark_workspace_url(spark)
     return spark_workspace_url == workspace_url
+
 
 def get_spark_current_user(spark: DatabricksSession) -> str:
     """Get the current user from the Spark session configuration."""
@@ -57,6 +59,7 @@ def get_spark_current_user(spark: DatabricksSession) -> str:
     execution_user = spark.sql("SELECT current_user() as user").collect()[0]["user"]
 
     return execution_user
+
 
 def get_workspace_url_from_host(host: str) -> str:
     """Extract the workspace URL from the host."""
@@ -128,3 +131,13 @@ def retry_with_logging(
         return wrapper
 
     return decorator
+
+def merge_maps(source_maps: list, target_maps: list, overwrite: bool) -> dict:
+    """Merge source and target maps based on overwrite setting."""
+    merged_maps = (
+        {k: v for d in source_maps for k, v in d.items() if v is not None} if source_maps else {}
+    )
+    if not overwrite and target_maps:
+        existing_maps = {k: v for d in target_maps for k, v in d.items() if v is not None}
+        merged_maps = {**merged_maps, **existing_maps}
+    return merged_maps

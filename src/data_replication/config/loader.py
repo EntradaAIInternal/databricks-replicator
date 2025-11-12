@@ -41,7 +41,6 @@ class ConfigLoader:
         table_types_override: list = None,
         volume_types_override: list = None,
         logging_level_override: str = None,
-        replication_wait_secs_override: int = None,
     ) -> ReplicationSystemConfig:
         """
         Load and validate configuration from a YAML file.
@@ -96,15 +95,6 @@ class ConfigLoader:
             except Exception as e:
                 raise ConfigurationError(
                     f"Invalid uc_object_types configuration: {e}"
-                ) from e
-
-        # Handle replication_wait_secs override
-        if replication_wait_secs_override is not None:
-            try:
-                config_data["replication_wait_secs"] = replication_wait_secs_override
-            except Exception as e:
-                raise ConfigurationError(
-                    f"Invalid replication_wait_secs configuration: {e}"
                 ) from e
 
         # Handle table_types override

@@ -15,6 +15,7 @@ from ..config.models import RunResult, TableConfig, UCObjectType, VolumeConfig
 from ..exceptions import ReplicationError, TableNotFoundError
 from ..utils import (
     get_workspace_url_from_host,
+    merge_maps,
     retry_with_logging,
     create_spark_session,
     validate_spark_session,
@@ -27,7 +28,12 @@ class ReplicationProvider(BaseProvider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Setup source Spark session if uc_object_types is not empty or if create_shared_catalog is True but source_databricks_connect_config.sharing_identifier is not provided
+        self.source_spark = None
+        self.source_dbops = None
+        self.target_spark = None
+        self.target_dbops = None
+
+        # default driving spark is target spark. Create source spark for uc replication or if create_shared_catalog is True but source_databricks_connect_config.sharing_identifier is not provided
         if (
             self.catalog_config.uc_object_types
             and len(self.catalog_config.uc_object_types) > 0
@@ -50,6 +56,17 @@ class ReplicationProvider(BaseProvider):
             )
             self.source_dbops = DatabricksOperations(self.source_spark, self.logger)
 
+        # for uc replication, set default driving spark to source spark and dbops to source dbops. Create separate target spark and dbops.
+        if (
+            self.catalog_config.uc_object_types
+            and len(self.catalog_config.uc_object_types) > 0
+        ):
+            # set target spark and dbops to current spark and dbops
+            self.target_spark = self.spark
+            self.target_dbops = self.db_ops
+            self.spark = self.source_spark
+            self.db_ops = self.source_dbops
+
     def get_operation_name(self) -> str:
         """Get the name of the operation for logging purposes."""
         return "replication"
@@ -68,11 +85,8 @@ class ReplicationProvider(BaseProvider):
             result = self._replicate_table(schema_name, table_name)
             results.append(result)
 
-        if (
-            self.catalog_config.uc_object_types
-            and len(self.catalog_config.uc_object_types) > 0
-        ):
-            if self.catalog_config.uc_object_types and (
+        if self.catalog_config.uc_object_types:
+            if (
                 UCObjectType.TABLE_TAG in self.catalog_config.uc_object_types
                 or UCObjectType.ALL in self.catalog_config.uc_object_types
             ):
@@ -80,8 +94,8 @@ class ReplicationProvider(BaseProvider):
                     schema_name,
                     table_name,
                 )
-                results.append(result)
-            if self.catalog_config.uc_object_types and (
+                results.extend(result)
+            if (
                 UCObjectType.COLUMN_TAG in self.catalog_config.uc_object_types
                 or UCObjectType.ALL in self.catalog_config.uc_object_types
             ):
@@ -89,61 +103,85 @@ class ReplicationProvider(BaseProvider):
                     schema_name,
                     table_name,
                 )
-                results.append(result)
+                results.extend(result)
+            if (
+                UCObjectType.COLUMN_COMMENT in self.catalog_config.uc_object_types
+                or UCObjectType.ALL in self.catalog_config.uc_object_types
+            ):
+                result = self._replicate_column_comments(
+                    schema_name,
+                    table_name,
+                )
+                results.extend(result)
         return results
 
     def process_volume(self, schema_name: str, volume_name: str) -> RunResult:
         """Process a single volume for replication."""
-        result = None
+        results = []
+        # Check for volume replication first
         if (
             self.catalog_config.volume_types
             and len(self.catalog_config.volume_types) > 0
         ):
             result = self._replicate_volume(schema_name, volume_name)
-        return result
+            results.append(result)
+
+        # Check for volume tag replication
+        if (
+            self.catalog_config.uc_object_types
+            and len(self.catalog_config.uc_object_types) > 0
+            and (
+                UCObjectType.VOLUME_TAG in self.catalog_config.uc_object_types
+                or UCObjectType.ALL in self.catalog_config.uc_object_types
+            )
+        ):
+            result = self._replicate_volume_tags(
+                schema_name,
+                volume_name,
+            )
+            results.extend(result)
+        return results
 
     def setup_operation_catalogs(self) -> str:
         """Setup replication-specific catalogs."""
         replication_config = self.catalog_config.replication_config
-        if replication_config.create_target_catalog:
-            self.logger.info(
-                f"""Creating target catalog: {self.catalog_config.catalog_name} at location: {replication_config.target_catalog_location}"""
-            )
-            self.db_ops.create_catalog_if_not_exists(
-                self.catalog_config.catalog_name,
-                replication_config.target_catalog_location,
-            )
-        # Create intermediate catalog if needed
-        if (
-            replication_config.create_intermediate_catalog
-            and replication_config.intermediate_catalog
-        ):
-            self.logger.info(
-                f"""Creating intermediate catalog: {replication_config.intermediate_catalog} at location: {replication_config.intermediate_catalog_location}"""
-            )
-            self.db_ops.create_catalog_if_not_exists(
-                replication_config.intermediate_catalog,
-                replication_config.intermediate_catalog_location,
-            )
-
-        # Create source catalog from share if needed
-        if replication_config.create_shared_catalog:
-            sharing_identifier = self.source_databricks_config.sharing_identifier
-            if not sharing_identifier:
-                sharing_identifier = (
-                    self.source_dbops.get_metastore_id()
+        if not self.catalog_config.uc_object_types:
+            # Create target catalog if needed
+            if replication_config.create_target_catalog:
+                self.logger.info(
+                    f"""Creating target catalog: {self.catalog_config.catalog_name} at location: {replication_config.target_catalog_location}"""
                 )
-            provider_name = self.db_ops.get_provider_name(
-                sharing_identifier
-            )
-            self.logger.info(
-                f"""Creating source catalog from share: {replication_config.source_catalog} using share name: {replication_config.share_name}"""
-            )
-            self.db_ops.create_catalog_using_share_if_not_exists(
-                replication_config.source_catalog,
-                provider_name,
-                replication_config.share_name,
-            )
+                self.db_ops.create_catalog_if_not_exists(
+                    self.catalog_config.catalog_name,
+                    replication_config.target_catalog_location,
+                )
+            # Create intermediate catalog if needed
+            if (
+                replication_config.create_intermediate_catalog
+                and replication_config.intermediate_catalog
+            ):
+                self.logger.info(
+                    f"""Creating intermediate catalog: {replication_config.intermediate_catalog} at location: {replication_config.intermediate_catalog_location}"""
+                )
+                self.db_ops.create_catalog_if_not_exists(
+                    replication_config.intermediate_catalog,
+                    replication_config.intermediate_catalog_location,
+                )
+
+            # Create source catalog from share if needed
+            if replication_config.create_shared_catalog:
+                sharing_identifier = self.source_databricks_config.sharing_identifier
+                if not sharing_identifier:
+                    sharing_identifier = self.source_dbops.get_metastore_id()
+                provider_name = self.db_ops.get_provider_name(sharing_identifier)
+                self.logger.info(
+                    f"""Creating source catalog from share: {replication_config.source_catalog} using share name: {replication_config.share_name}"""
+                )
+                self.db_ops.create_catalog_using_share_if_not_exists(
+                    replication_config.source_catalog,
+                    provider_name,
+                    replication_config.share_name,
+                )
 
         return replication_config.source_catalog
 
@@ -155,17 +193,17 @@ class ReplicationProvider(BaseProvider):
     ) -> List[RunResult]:
         """Override to add replication-specific schema setup."""
         replication_config = self.catalog_config.replication_config
+        if not self.catalog_config.uc_object_types:
+            # Create intermediate schema if needed
+            if replication_config.intermediate_catalog:
+                self.db_ops.create_schema_if_not_exists(
+                    replication_config.intermediate_catalog, schema_name
+                )
 
-        # Create intermediate schema if needed
-        if replication_config.intermediate_catalog:
+            # Create target schema if needed
             self.db_ops.create_schema_if_not_exists(
-                replication_config.intermediate_catalog, schema_name
+                self.catalog_config.catalog_name, schema_name
             )
-
-        # Create target schema if needed
-        self.db_ops.create_schema_if_not_exists(
-            self.catalog_config.catalog_name, schema_name
-        )
 
         return super().process_schema_concurrently(schema_name, table_list, volume_list)
 
@@ -221,11 +259,9 @@ class ReplicationProvider(BaseProvider):
             except TableNotFoundError as exc:
                 table_details = self.db_ops.get_table_details(source_table)
                 if table_details["is_dlt"]:
-                    raise TableNotFoundError(
-                        f"""
+                    raise TableNotFoundError(f"""
                         Target table {target_table} does not exist. Cannot replicate DLT table without existing target.
-                        """
-                    ) from exc
+                        """) from exc
                 dlt_flag = False
                 pipeline_id = None
                 actual_target_table = target_table
@@ -415,7 +451,7 @@ class ReplicationProvider(BaseProvider):
                 max_attempts=max_attempts,
             )
 
-    def _replicate_volume(self, schema_name: str, volume_name: str) -> RunResult:
+    def _replicate_volume(self, schema_name: str, volume_name: str) -> List[RunResult]:
         """
         Replicate a single volume.
 
@@ -594,10 +630,10 @@ class ReplicationProvider(BaseProvider):
                 .filter("info_name = 'Volume Path'")
                 .collect()[0]["info_value"]
             )
-        except Exception:
+        except Exception as exc:
             raise ReplicationError(
                 f"Cannot get location for source volume: {source_volume}"
-            )
+            ) from exc
 
         if not self.external_location_mapping:
             raise ReplicationError(
@@ -843,7 +879,7 @@ class ReplicationProvider(BaseProvider):
         self,
         schema_name: str,
         table_name: str,
-    ) -> RunResult:
+    ) -> List[RunResult]:
         """
         Replicate table tags from source to target table.
 
@@ -855,110 +891,557 @@ class ReplicationProvider(BaseProvider):
             RunResult object for the tag replication operation
         """
         start_time = datetime.now(timezone.utc)
+        run_results = []
         replication_config = self.catalog_config.replication_config
-        source_catalog = replication_config.original_source_catalog
+        source_catalog = replication_config.source_catalog
+        target_catalog = self.catalog_config.catalog_name
+        object_type = "table_tag"
+        source_table = f"`{source_catalog}`.`{schema_name}`.`{table_name}`"
+        target_table = f"`{target_catalog}`.`{schema_name}`.`{table_name}`"
+        max_attempts = self.retry.max_attempts
+
+        if self.source_spark.catalog.tableExists(
+            source_table
+        ) and self.target_spark.catalog.tableExists(target_table):
+            # Get target and source table tags
+            target_tag_names, target_tag_maps = self.target_dbops.get_table_tags(
+                target_catalog, schema_name, table_name
+            )
+            _, source_tag_maps = self.source_dbops.get_table_tags(
+                source_catalog, schema_name, table_name
+            )
+
+            # Execute tag replication using helper method
+            run_result = self._replicate_tags(
+                object_type=object_type,
+                source_tag_maps_list=source_tag_maps,
+                target_tag_names_list=target_tag_names,
+                target_tag_maps_list=target_tag_maps,
+                overwrite_tags=replication_config.overwrite_tags,
+                source_catalog=source_catalog,
+                target_catalog=target_catalog,
+                schema_name=schema_name,
+                table_name=table_name,
+            )
+            run_results.append(run_result)
+        else:
+            self.logger.warning(
+                f"Source or target table does not exist for tag replication: `{target_catalog}`.`{schema_name}`.`{table_name}`",
+                extra={"run_id": self.run_id, "operation": "replication"},
+            )
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+            run_results.append(
+                RunResult(
+                    operation_type="uc_replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=table_name,
+                    object_type="table_tag",
+                    status="failed",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    error_message="Source or Target table does not exist",
+                    details={
+                        "source_object": source_table,
+                        "target_object": target_table,
+                    },
+                    attempt_number=1,
+                    max_attempts=max_attempts,
+                )
+            )
+        return run_results
+
+    def _replicate_column_tags(
+        self,
+        schema_name: str,
+        table_name: str,
+    ) -> List[RunResult]:
+        """
+        Replicate column tags from source to target table.
+
+        Args:
+            schema_name: Schema name
+            table_name: Table name to replicate column tags for
+        """
+        start_time = datetime.now(timezone.utc)
+        replication_config = self.catalog_config.replication_config
+        source_catalog = replication_config.source_catalog
         target_catalog = self.catalog_config.catalog_name
         source_table = f"`{source_catalog}`.`{schema_name}`.`{table_name}`"
         target_table = f"`{target_catalog}`.`{schema_name}`.`{table_name}`"
+        object_type = "column_tag"
 
-        unset_sql = None
-        set_sql = None
         attempt = 1
         max_attempts = self.retry.max_attempts
         last_exception = None
 
+        run_results = []
+
         try:
-            self.logger.info(
-                f"Starting table tag replication: {source_table} -> {target_table}",
+            if not self.source_spark.catalog.tableExists(
+                source_table
+            ) or not self.target_spark.catalog.tableExists(target_table):
+                self.logger.warning(
+                    f"Source or target table does not exist for column tag replication: {source_table} -> {target_table}",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type="column_tag",
+                        status="failed",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        error_message="Source or Target table does not exist",
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+            # Get source and target column tags
+            source_df = self.source_dbops.get_column_tags_df(
+                source_catalog, schema_name, table_name
+            ).selectExpr(
+                "column_name",
+                "tag_names_list as source_tag_names_list",
+                "tag_maps_list as source_tag_maps_list",
+            )
+            target_df = self.target_dbops.get_column_tags_df(
+                target_catalog, schema_name, table_name
+            ).selectExpr(
+                "column_name",
+                "tag_names_list as target_tag_names_list",
+                "tag_maps_list as target_tag_maps_list",
+            )
+            column_with_tags_in_source = 0
+            column_with_tags_in_target = 0
+            df = None
+            if not source_df.isEmpty() and not target_df.isEmpty():
+                column_with_tags_in_source = source_df.count()
+                column_with_tags_in_target = target_df.count()
+                # Copy source dataframe to target using list comprehension
+                source_df_new = self.target_spark.createDataFrame(
+                    [
+                        (
+                            row["column_name"],
+                            row["source_tag_names_list"],
+                            row["source_tag_maps_list"],
+                        )
+                        for row in source_df.collect()
+                    ],
+                    [
+                        "column_name",
+                        "source_tag_names_list",
+                        "source_tag_maps_list",
+                    ],
+                )
+                df = source_df_new.join(
+                    target_df, on=["column_name"], how="fullouter"
+                ).selectExpr(
+                    "column_name",
+                    "source_tag_names_list",
+                    "source_tag_maps_list",
+                    "target_tag_names_list",
+                    "target_tag_maps_list",
+                )
+            elif not source_df.isEmpty() and target_df.isEmpty():
+                column_with_tags_in_source = source_df.count()
+                df = source_df.selectExpr(
+                    "column_name",
+                    "source_tag_names_list",
+                    "source_tag_maps_list",
+                    "array() as target_tag_names_list",
+                    "array() as target_tag_maps_list",
+                )
+            elif source_df.isEmpty() and not target_df.isEmpty():
+                column_with_tags_in_target = target_df.count()
+                df = target_df.selectExpr(
+                    "column_name",
+                    "array() as source_tag_names_list",
+                    "array() as source_tag_maps_list",
+                    "target_tag_names_list",
+                    "target_tag_maps_list",
+                )
+
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+            if not df:
+                self.logger.info(
+                    f"No columns with tags found for table: {source_table} -> {target_table} "
+                    f"({duration:.2f}s)",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type="column_tag",
+                        status="success",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                            "overwrite_tags": replication_config.overwrite_tags,
+                            "columns_with_tags_in_source": column_with_tags_in_source,
+                            "columns_with_tags_in_target": column_with_tags_in_target,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+            if (
+                column_with_tags_in_source == 0
+                and not replication_config.overwrite_tags
+            ):
+                self.logger.info(
+                    f"No columns with tags found in source for table: {source_table} -> {target_table} "
+                    f"and overwrite_tags is disabled, skipping column tag replication "
+                    f"({duration:.2f}s)",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type="column_tag",
+                        status="success",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                            "overwrite_tags": replication_config.overwrite_tags,
+                            "columns_with_tags_in_source": column_with_tags_in_source,
+                            "columns_with_tags_in_target": column_with_tags_in_target,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+
+            for row in df.collect():
+                column_name = row["column_name"]
+                source_tag_maps_list = row["source_tag_maps_list"]
+                target_tag_names_list = row["target_tag_names_list"]
+                target_tag_maps_list = row["target_tag_maps_list"]
+
+                run_result = self._replicate_tags(
+                    object_type=object_type,
+                    source_tag_maps_list=source_tag_maps_list,
+                    target_tag_names_list=target_tag_names_list,
+                    target_tag_maps_list=target_tag_maps_list,
+                    overwrite_tags=replication_config.overwrite_tags,
+                    source_catalog=source_catalog,
+                    target_catalog=target_catalog,
+                    schema_name=schema_name,
+                    table_name=table_name,
+                    column_name=column_name,
+                )
+                run_results.append(run_result)
+
+            return run_results
+        except Exception as e:
+            last_exception = e
+
+        # Handle failure case
+        end_time = datetime.now(timezone.utc)
+        duration = (end_time - start_time).total_seconds()
+
+        error_msg = f"Column tag replication failed {source_table} -> {target_table}"
+        if last_exception:
+            error_msg += f" | Last error: {str(last_exception)}"
+
+        self.logger.error(
+            error_msg,
+            extra={"run_id": self.run_id, "operation": "replication"},
+        )
+
+        run_results.append(
+            RunResult(
+                operation_type="uc_replication",
+                catalog_name=target_catalog,
+                schema_name=schema_name,
+                object_name=table_name,
+                object_type="column_tag",
+                status="failed",
+                start_time=start_time.isoformat(),
+                end_time=end_time.isoformat(),
+                duration_seconds=duration,
+                error_message=str(last_exception)
+                if last_exception
+                else "Unknown error",
+                details={
+                    "source_object": source_table,
+                    "target_object": target_table,
+                    "overwrite_tags": replication_config.overwrite_tags,
+                    "columns_with_tags_in_source": column_with_tags_in_source,
+                    "columns_with_tags_in_target": column_with_tags_in_target,
+                },
+                attempt_number=attempt,
+                max_attempts=max_attempts,
+            )
+        )
+        return run_results
+
+    def _replicate_volume_tags(
+        self,
+        schema_name: str,
+        volume_name: str,
+    ) -> list[RunResult]:
+        """
+        Replicate volume tags from source to target volume.
+
+        Args:
+            schema_name: Schema name
+            volume_name: Volume name to replicate tags for
+
+        Returns:
+            RunResult object for the tag replication operation
+        """
+        start_time = datetime.now(timezone.utc)
+        run_results = []
+        replication_config = self.catalog_config.replication_config
+        source_catalog = replication_config.source_catalog
+        target_catalog = self.catalog_config.catalog_name
+        object_type = "volume_tag"
+        source_volume = f"`{source_catalog}`.`{schema_name}`.`{volume_name}`"
+        target_volume = f"`{target_catalog}`.`{schema_name}`.`{volume_name}`"
+        max_attempts = self.retry.max_attempts
+
+        if not self.source_dbops.if_volume_exists(
+            source_volume
+        ) or not self.target_dbops.if_volume_exists(target_volume):
+            self.logger.warning(
+                f"Source or target volume does not exist for tag replication: {source_volume} -> {target_volume}",
                 extra={"run_id": self.run_id, "operation": "replication"},
             )
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+            run_results.append(
+                RunResult(
+                    operation_type="uc_replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=volume_name,
+                    object_type="volume_tag",
+                    status="failed",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    error_message="Source or Target volume does not exist",
+                    details={
+                        "source_object": source_volume,
+                        "target_object": target_volume,
+                    },
+                    attempt_number=1,
+                    max_attempts=max_attempts,
+                )
+            )
+            return run_results
 
-            # Use custom retry decorator with logging
-            @retry_with_logging(self.retry, self.logger)
-            def tagging_operation(unset_query: str, set_query: str):
-                if unset_query:
-                    self.logger.debug(
-                        f"Executing tag unset query: {unset_query}",
-                        extra={"run_id": self.run_id, "operation": "replication"},
-                    )
-                    self.spark.sql(unset_query)
-                if set_query:
-                    self.logger.debug(
-                        f"Executing tag set query: {set_query}",
-                        extra={"run_id": self.run_id, "operation": "replication"},
-                    )
-                    self.spark.sql(set_query)
-                return True
+        # Get target and source table tags
+        target_tag_names, target_tag_maps = self.target_dbops.get_volume_tags(
+            target_catalog, schema_name, volume_name
+        )
+        _, source_tag_maps = self.source_dbops.get_volume_tags(
+            source_catalog, schema_name, volume_name
+        )
 
-            # Get target table tags
-            tag_names_list, tag_maps_list = self.db_ops.get_table_tags(
+        # Execute tag replication using helper method
+        run_result = self._replicate_tags(
+            object_type=object_type,
+            source_tag_maps_list=source_tag_maps,
+            target_tag_names_list=target_tag_names,
+            target_tag_maps_list=target_tag_maps,
+            overwrite_tags=replication_config.overwrite_tags,
+            source_catalog=source_catalog,
+            target_catalog=target_catalog,
+            schema_name=schema_name,
+            volume_name=volume_name,
+        )
+        run_results.append(run_result)
+        return run_results
+
+    def _replicate_column_comments(
+        self,
+        schema_name: str,
+        table_name: str,
+    ) -> List[RunResult]:
+        """
+        Replicate column comments from source to target table.
+
+        Args:
+            schema_name: Schema name
+            table_name: Table name to replicate comments for
+        """
+
+        # Use custom retry decorator with logging
+        @retry_with_logging(self.retry, self.logger)
+        def column_comment_replication_operation(query: str):
+            self.logger.debug(
+                f"Executing column comment replication query: {query}",
+                extra={"run_id": self.run_id, "operation": "replication"},
+            )
+            self.target_spark.sql(query)
+            return True
+
+        run_results = []
+        start_time = datetime.now(timezone.utc)
+        query = ""
+        attempt = 1
+        max_attempts = self.retry.max_attempts
+        last_exception = None
+        result = True
+
+        try:
+            replication_config = self.catalog_config.replication_config
+            source_catalog = replication_config.source_catalog
+            target_catalog = self.catalog_config.catalog_name
+            source_table = f"`{source_catalog}`.`{schema_name}`.`{table_name}`"
+            target_table = f"`{target_catalog}`.`{schema_name}`.`{table_name}`"
+            object_type = "column_comment"
+
+            if not self.source_spark.catalog.tableExists(
+                source_table
+            ) or not self.target_spark.catalog.tableExists(target_table):
+                self.logger.warning(
+                    f"Source or target table does not exist for comment replication: `{target_catalog}`.`{schema_name}`.`{table_name}`",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type="column_comment",
+                        status="failed",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        error_message="Source or Target table does not exist",
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                        },
+                        attempt_number=1,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+
+            # Get source and target column comments
+            source_comment_maps_list = self.source_dbops.get_column_comments(
+                source_catalog, schema_name, table_name
+            )
+            target_comment_maps_list = self.target_dbops.get_column_comments(
                 target_catalog, schema_name, table_name
             )
 
-            # Unset existing tags if overwrite_tags is enabled
-            if tag_names_list and replication_config.overwrite_tags:
-                tag_names_str = ",".join([f"'{tag}'" for tag in tag_names_list])
-                unset_sql = f"ALTER TABLE `{target_catalog}`.`{schema_name}`.`{table_name}` UNSET TAGS ( {tag_names_str} )"
-
-            # Get source table tags
-            _, tag_maps_list_new = self.source_dbops.get_table_tags(
-                source_catalog, schema_name, table_name
+            merged_comment_maps = merge_maps(
+                source_comment_maps_list,
+                target_comment_maps_list,
+                replication_config.overwrite_comments,
             )
 
-            # Merge tag maps if overwrite_tags is disabled
-            merged_tag_maps = (
-                {k: v for d in tag_maps_list_new for k, v in d.items()}
-                if tag_maps_list_new
-                else {}
-            )
-            if not replication_config.overwrite_tags and tag_maps_list:
-                existing_tag_maps = {k: v for d in tag_maps_list for k, v in d.items()}
-                merged_tag_maps = {**merged_tag_maps, **existing_tag_maps}
+            table_type = self.source_dbops.get_table_type(source_table)
 
-            # Create SET TAGS SQL if there are tags to apply
-            if merged_tag_maps:
-                tag_maps_str = ",".join(
-                    [f"'{key}' = '{value}'" for key, value in merged_tag_maps.items()]
-                )
-                set_sql = f"ALTER TABLE `{target_catalog}`.`{schema_name}`.`{table_name}` SET TAGS ( {tag_maps_str} )"
+            comment_list = [
+                f"`{k}` COMMENT '{v}'"
+                for k, v in merged_comment_maps.items()
+                if v is not None
+            ]
+            comment_str = ",".join(comment_list).replace("\\", "\\\\").replace("'", "'")
 
-            # Execute tagging operation
-            result, last_exception, attempt, max_attempts = tagging_operation(
-                unset_sql, set_sql
-            )
+            if len(comment_list) > 0:
+                if table_type.lower() == "view" or table_type.lower() == "streaming_table":
+                    filtered_comment_maps = {
+                        k: v for k, v in merged_comment_maps.items() if v is not None
+                    }
+                    for name, comment in filtered_comment_maps.items():
+                        comment_str = comment.replace("\\", "\\\\").replace("'", "''")
+                        query = f"""
+                        COMMENT ON COLUMN {target_table}.`{name}` IS '{comment_str}'
+                        """
+                        if table_type.lower() == "streaming_table":
+                            query = f"""
+                            ALTER STREAMING TABLE {target_table} ALTER COLUMN `{name}` COMMENT '{comment_str}'
+                            """
+                        # Execute the replication
+                        result, last_exception, attempt, max_attempts = (
+                            column_comment_replication_operation(query)
+                        )
+                elif table_type.lower() in ["managed","external"]:
+                    query = f"""
+                    ALTER TABLE {target_table} ALTER COLUMN {comment_str}
+                    """
+
+                    # Execute the replication
+                    result, last_exception, attempt, max_attempts = (
+                        column_comment_replication_operation(query)
+                    )
+                else:
+                    self.logger.warning(
+                        f"Unsupported table type for column comment replication: {table_type} for table {source_table}",
+                        extra={"run_id": self.run_id, "operation": "replication"},
+                    )
 
             end_time = datetime.now(timezone.utc)
             duration = (end_time - start_time).total_seconds()
 
             if result:
                 self.logger.info(
-                    f"Table tag replication completed successfully: {source_table} -> {target_table} "
+                    f"{object_type} replication completed successfully: {source_table} -> {target_table} "
                     f"({duration:.2f}s)",
                     extra={"run_id": self.run_id, "operation": "replication"},
                 )
 
-                return RunResult(
-                    operation_type="replication",
-                    catalog_name=target_catalog,
-                    schema_name=schema_name,
-                    object_name=table_name,
-                    object_type="table_tags",
-                    status="success",
-                    start_time=start_time.isoformat(),
-                    end_time=end_time.isoformat(),
-                    duration_seconds=duration,
-                    details={
-                        "target_table": target_table,
-                        "source_table": source_table,
-                        "overwrite_tags": replication_config.overwrite_tags,
-                        "tags_applied": len(merged_tag_maps) if merged_tag_maps else 0,
-                        "unset_sql": unset_sql,
-                        "set_sql": set_sql,
-                    },
-                    attempt_number=attempt,
-                    max_attempts=max_attempts,
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type=object_type,
+                        status="success",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                            "overwrite_comments": replication_config.overwrite_comments,
+                            "columns_with_comments": len(comment_list) if comment_list else 0,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
                 )
-
+                return run_results
         except Exception as e:
             last_exception = e
 
@@ -967,8 +1450,7 @@ class ReplicationProvider(BaseProvider):
         duration = (end_time - start_time).total_seconds()
 
         error_msg = (
-            f"Table tag replication failed after {max_attempts} attempts: "
-            f"{source_table} -> {target_table}"
+            f"Column comment replication failed {source_table} -> {target_table}"
         )
         if last_exception:
             error_msg += f" | Last error: {str(last_exception)}"
@@ -978,48 +1460,27 @@ class ReplicationProvider(BaseProvider):
             extra={"run_id": self.run_id, "operation": "replication"},
         )
 
-        return RunResult(
-            operation_type="replication",
-            catalog_name=target_catalog,
-            schema_name=schema_name,
-            object_name=table_name,
-            object_type="table_tags",
-            status="failed",
-            start_time=start_time.isoformat(),
-            end_time=end_time.isoformat(),
-            duration_seconds=duration,
-            error_message=str(last_exception) if last_exception else "Unknown error",
-            details={
-                "target_table": target_table,
-                "source_table": source_table,
-                "overwrite_tags": replication_config.overwrite_tags,
-                "unset_sql": unset_sql,
-                "set_sql": set_sql,
-            },
-            attempt_number=attempt,
-            max_attempts=max_attempts,
+        run_results.append(
+            RunResult(
+                operation_type="uc_replication",
+                catalog_name=target_catalog,
+                schema_name=schema_name,
+                object_name=table_name,
+                object_type="column_comment",
+                status="failed",
+                start_time=start_time.isoformat(),
+                end_time=end_time.isoformat(),
+                duration_seconds=duration,
+                error_message=str(last_exception)
+                if last_exception
+                else "Unknown error",
+                details={
+                    "source_object": source_table,
+                    "target_object": target_table,
+                    "overwrite_comments": replication_config.overwrite_comments,
+                },
+                attempt_number=1,
+                max_attempts=max_attempts,
+            )
         )
-
-    def _replicate_column_tags(
-        self,
-        schema_name: str,
-        table_name: str,
-    ) -> RunResult:
-        """
-        Replicate column tags from source to target table.
-
-        Args:
-            schema_name: Schema name
-            table_name: Table name to replicate column tags for
-        """
-        # Get source column tags
-        source_column_tags = self.db_ops.get_column_tags(schema_name, table_name)
-
-        # Apply column tags to target table
-        for column_name, tags in source_column_tags.items():
-            for tag, value in tags.items():
-                self.db_ops.set_column_tag(
-                    schema_name, table_name, column_name, tag, value
-                )
-
-        return RunResult(success=True)
+        return run_results

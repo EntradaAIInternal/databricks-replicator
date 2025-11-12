@@ -48,25 +48,25 @@ audit_config:
 external_location_mapping:
 "abfss://test@oneenvadls.dfs.core.windows.net/": "s3://one-env-uc-external-location/test/"
 
-# Mandatory: At least one of uc_object_types, table_types, volume_types must be provided at args level(highest priority), catalog level or replication group level (lowest priority).
+# Mandatory: Only one of uc_object_types, table_types, volume_types must be provided at args level(highest priority), catalog level or replication group level (lowest priority).
 # when uc_object_types is provided, uc metadata will be replicated.
 # when table_types is provided, data in tables of specified types will be replicated.
 # when volume_types is provided, files in volumes of specified types will be replicated.
-# both table_types and volume_types will also apply filter on tables/volumes for table_tag, column_tag and volume_tag replication.
 
 # Optional: replication group level. can be overriden by catalog level or args
 uc_object_types:
   [
     "all",
-    "catalog",
+    # "catalog", 
     "catalog_tag",
-    "schema",
+    # "schema",
     "schema_tag",
     "view_tag",
-    "volume",
+    # "volume",
     "volume_tag",
     "table_tag",
     "column_tag",
+    "column_comment"
   ]
 
 # Optional: replication group level. can be overriden by catalog level or args
@@ -76,7 +76,7 @@ table_types: ["streaming_table"]
 
 # Optional: replication group level. can be overriden by catalog level or args
 # supported volume types: managed, external.
-volume_types: ["all","managed", "external"]
+# volume_types: ["all","managed", "external"]
 
 # Mandatory: At least one of backup_config, replication_config, reconciliation_config must be provided at catalog level or replication group level (lower priority).
 
@@ -112,8 +112,6 @@ backup_config:
 replication_config:
   # Mandatory at replication group level or catalog level: whether to replicate catalog.
   enabled: true
-  # Optional: wait for shares schemas to be visible in target workspace before replication starts. default is 60 seconds.
-  replication_wait_secs: 60
   # Optional: whether to replicate the catalog if it does not exist on target.default is false.
   create_target_catalog: false
   # Optional: target catalog location. default is None.
@@ -123,11 +121,9 @@ replication_config:
   # Optional: share name. default to __replication_internal_<catalog_name>_to_<target_databricks_connect_config.name>_share for streaming table
   # <catalog_name>_to_<target_databricks_connect_config.name>_share for others
   share_name: "__replication_internal_catalog_example_to_aws_share"
-  # Optional: shared catalog name/source catalog name. default to __replication_internal_<catalog_name>_from_<source_databricks_connect_config.name>_shared for streaming table
+  # Optional: shared catalog name/source catalog name. default to __replication_internal_<catalog_name>_from_<source_databricks_connect_config.name>_shared for streaming table, default to target_catalog for others
   # <catalog_name>_from_<source_databricks_connect_config.name>_shared for others
   source_catalog: "__replication_internal_catalog_example_from_azure_shared"
-  # Optional: source catalog name in the source for replication. if not provided, same as target catalog.
-  original_source_catalog: "catalog_example"
   # Optional: whether to create intermediate catalog for replication. default is false.
   create_intermediate_catalog: false
   # Optional: intermediate catalog for replication. default is None.
@@ -138,6 +134,10 @@ replication_config:
   enforce_schema: true
   # Optional: whether to overwrite tags during replication. default is true.
   overwrite_tags: true
+  # Optional: whether to overwrite comments during replication. default is true.
+  overwrite_comments: true
+  # Optional: whether to copy files during external table replication. default is true.
+  copy_files: true
 
 # Optional: reconciliation configuration (at replication group level)
 reconciliation_config:

@@ -28,7 +28,6 @@ audit_config:
 
 target_catalogs:
   - catalog_name: "aaron"
-    uc_object_types: ["table_tag"]
     table_types: ["streaming_table"]
     target_schemas:
       - schema_name: "bronze_1"

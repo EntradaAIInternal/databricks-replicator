@@ -1,7 +1,8 @@
 # cli: data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --target-catalog [catalog_name] --target-schemas [schema1,schema2] --uc-object-types [table_tag,column_tag]
-# 1. Create delta share infrastructure in this tool including recipient, shares and shared catalogs with default system generated names.
+# 1. Delta share is not required for uc replication. Both source and target UC should be accessible via Databricks Connect.
 # 2. Replicate source UC metadata objects to target UC.
 # 3. For external tables, use external location mapping specified below
+# 4. No replication_wait_secs is needed as both source and target are UC.
 
 version: "1.0"
 
@@ -9,12 +10,14 @@ replication_group: "uc_metadata"
 
 source_databricks_connect_config:
   name: "azure"
+  host: "https://adb-984752964297111.11.azuredatabricks.net"  
   token:
     secret_scope: "test_kr"
     secret_key: "pat_source"
 
 target_databricks_connect_config:
   name: "aws"
+  host: "https://e2-demo-field-eng.cloud.databricks.com"  
   token:
     secret_scope: "test_kr"
     secret_key: "pat_target"
@@ -25,14 +28,10 @@ external_location_mapping:
 audit_config:
   audit_table: "data_replication.audit.audit_logging"
 
-backup_config:
-  enabled: true
-  create_recipient: true
-  create_share: true
 replication_config:
   enabled: true
-  create_target_catalog: true
-  create_shared_catalog: true
+  overwrite_tags: false
+  overwrite_comments: false
 
 concurrency:
   max_workers: 5

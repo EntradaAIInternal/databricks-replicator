@@ -113,7 +113,7 @@ class BackupProvider(BaseProvider):
         if backup_config.create_share:
             sharing_identifier = self.target_databricks_config.sharing_identifier
             if not sharing_identifier:
-                sharing_identifier = self.target_dbops.get_metastore_id()            
+                sharing_identifier = self.target_dbops.get_metastore_id()
             backup_config.recipient_name = self.db_ops.get_recipient_name(
                 sharing_identifier
             )
