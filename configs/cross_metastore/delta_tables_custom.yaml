@@ -1,4 +1,4 @@
-# cli: data-replicator configs/cross_metastore/delta_tables_custom.yaml --target-catalog [catalog_name]
+# cli: data-replicator configs/cross_metastore/delta_tables_custom.yaml --target-catalogs [catalog_name]
 # Steps:
 # 1. BYO delta share infrastructure. recipient, shares and catalogs are created outside of this tool.
 # 2. Backup with existing backup catalog and share names.

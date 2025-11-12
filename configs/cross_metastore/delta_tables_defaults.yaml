@@ -1,4 +1,4 @@
-# cli: data-replicator configs/cross_metastore/delta_tables_defaults.yaml --target-catalog [catalog_name]
+# cli: data-replicator configs/cross_metastore/delta_tables_defaults.yaml --target-catalogs [catalog_name]
 # Steps:
 # 1. Create delta share infrastructure in this tool including recipient, shares and shared catalogs with default system generated names.
 # 2. Add source schema to share.

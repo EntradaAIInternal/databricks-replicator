@@ -132,60 +132,74 @@ class ConfigLoader:
         # Handle target_catalog override
         if target_catalog_override:
             try:
+                # Parse comma-separated catalog names
+                catalog_names = [
+                    name.strip() for name in target_catalog_override.split(",")
+                ]
+                catalog_names = [name for name in catalog_names if name]  # Filter empty strings
+                
                 # Validate catalog name format (alphanumeric, dashes, and underscores)
-                if (
-                    not target_catalog_override.replace("_", "")
-                    .replace("-", "")
-                    .isalnum()
-                ):
-                    raise ValidationError(
-                        f"Invalid catalog name '{target_catalog_override}': "
-                        "catalog names can only contain alphanumeric characters, "
-                        "dashes, and underscores"
-                    )
+                for catalog_name in catalog_names:
+                    if (
+                        not catalog_name.replace("_", "")
+                        .replace("-", "")
+                        .isalnum()
+                    ):
+                        raise ValidationError(
+                            f"Invalid catalog name '{catalog_name}': "
+                            "catalog names can only contain alphanumeric characters, "
+                            "dashes, and underscores"
+                        )
 
                 # Generate TargetCatalogConfig with target_catalog_override and replication group level configs
                 filtered_catalogs = []
-                if "target_catalogs" in config_data:
-                    filtered_catalogs = [
-                        catalog
-                        for catalog in config_data["target_catalogs"]
-                        if catalog.get("catalog_name") == target_catalog_override
-                    ]
+                for catalog_name in catalog_names:
+                    existing_catalog = None
+                    if "target_catalogs" in config_data:
+                        existing_catalog = next(
+                            (
+                                catalog
+                                for catalog in config_data["target_catalogs"]
+                                if catalog.get("catalog_name") == catalog_name
+                            ),
+                            None,
+                        )
 
-                # If no matching catalog found, create one with replication group level configs
-                if not filtered_catalogs:
-                    new_catalog = {"catalog_name": target_catalog_override}
+                    if existing_catalog:
+                        filtered_catalogs.append(existing_catalog)
+                    else:
+                        # Create new catalog with replication group level configs
+                        new_catalog = {"catalog_name": catalog_name}
 
-                    # Inherit table_types from replication group level
-                    if "table_types" in config_data:
-                        new_catalog["table_types"] = config_data["table_types"]
+                        # Inherit table_types from replication group level
+                        if "table_types" in config_data:
+                            new_catalog["table_types"] = config_data["table_types"]
 
-                    # Inherit volume_types from replication group level
-                    if "volume_types" in config_data:
-                        new_catalog["volume_types"] = config_data["volume_types"]
+                        # Inherit volume_types from replication group level
+                        if "volume_types" in config_data:
+                            new_catalog["volume_types"] = config_data["volume_types"]
 
-                    # Inherit uc_object_types from replication group level
-                    if "uc_object_types" in config_data:
-                        new_catalog["uc_object_types"] = config_data["uc_object_types"]
+                        # Inherit uc_object_types from replication group level
+                        if "uc_object_types" in config_data:
+                            new_catalog["uc_object_types"] = config_data["uc_object_types"]
 
-                    # Inherit backup_config from replication group level
-                    if "backup_config" in config_data:
-                        new_catalog["backup_config"] = config_data["backup_config"]
+                        # Inherit backup_config from replication group level
+                        if "backup_config" in config_data:
+                            new_catalog["backup_config"] = config_data["backup_config"]
 
-                    # Inherit replication_config from replication group level
-                    if "replication_config" in config_data:
-                        new_catalog["replication_config"] = config_data[
-                            "replication_config"
-                        ]
+                        # Inherit replication_config from replication group level
+                        if "replication_config" in config_data:
+                            new_catalog["replication_config"] = config_data[
+                                "replication_config"
+                            ]
 
-                    # Inherit reconciliation_config from replication group level
-                    if "reconciliation_config" in config_data:
-                        new_catalog["reconciliation_config"] = config_data[
-                            "reconciliation_config"
-                        ]
+                        # Inherit reconciliation_config from replication group level
+                        if "reconciliation_config" in config_data:
+                            new_catalog["reconciliation_config"] = config_data[
+                                "reconciliation_config"
+                            ]
 
-                    filtered_catalogs = [new_catalog]
+                        filtered_catalogs.append(new_catalog)
 
                 config_data["target_catalogs"] = filtered_catalogs
 

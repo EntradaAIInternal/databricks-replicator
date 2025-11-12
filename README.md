@@ -105,8 +105,9 @@ Object level result details are recorded in configurable audit table location in
 
 ## Prerequisites
 - User or Service Principal in source and target workspace created with metastore admin right. If metastore admin permission is not available, check <a href=./permissions.md>here</a> to apply more granular UC access control 
-- PAT or OAuth Token for user or sp created and stored in Databricks Key Vault. 
+- PAT or OAuth Token for user or sp created and stored in Databricks Key Vault.
 **Note**: if this tool is run in source workspace, only target workspace token secrets need to be created in source. Conversely, if run in target workspace, source token needs to be created in target.
+- If not running using Serverless, cluster id for all-purpose cluster in source or/and workspace
 - For cross-metastore replication, enable Delta Sharing (DS) including network connectivity https://docs.databricks.com/aws/en/delta-sharing/set-up#gsc.tab=0
 - Network connectivity to source or target workspace. e.g. if tool runs in source workspace, source data plane (outbound) should be able to establish connect to target workspace control plane (inbound). And vica versa.
 **Note**: UC replication requires connect to both source and target workspace as delta share is not used.
@@ -135,22 +136,27 @@ data-replicator --help
 # Validate configuration without running
 data-replicator <config.yaml> --validate-only
 
-# Run all enabled operations against targeted catalog
-data-replicator <config.yaml>  --target-catalog catalog1
+# Run all enabled operations against targeted catalogs
+data-replicator <config.yaml>  --target-catalogs catalog1
+data-replicator <config.yaml>  --target-catalogs catalog1,catalog2
 
-# Run all enabled operations against targeted schemas
-data-replicator <config.yaml>  --target-catalog catalog1 --target-schemas bronze_1,bronze_2
+# Run all enabled operations against targeted schemas (single catalog only)
+data-replicator <config.yaml>  --target-catalogs catalog1 --target-schemas bronze_1,bronze_2
 
-# Run all enabled operations against targeted tables
-data-replicator <config.yaml>  --target-catalog catalog1 --target-schemas bronze_1 --target-tables table1,table2
+# Run all enabled operations against targeted tables (single catalog only)
+data-replicator <config.yaml>  --target-catalogs catalog1 --target-schemas bronze_1 --target-tables table1,table2
 
 # Run with different concurrency
-data-replicator <config.yaml>  --target-catalog catalog1 --concurrency 10
+data-replicator <config.yaml>  --target-catalogs catalog1 --concurrency 10
 
 # Run specific operation only
-data-replicator <config.yaml> --operation backup --target-catalog catalog1
-data-replicator <config.yaml> --operation replication --target-catalog catalog1
-data-replicator <config.yaml> --operation reconciliation --target-catalog catalog1
+data-replicator <config.yaml> --operation backup --target-catalogs catalog1
+data-replicator <config.yaml> --operation replication --target-catalogs catalog1
+data-replicator <config.yaml> --operation reconciliation --target-catalogs catalog1
+
+# Run multiple specific operations
+data-replicator <config.yaml> --operation backup,replication --target-catalogs catalog1
+data-replicator <config.yaml> --operation replication,reconciliation --target-catalogs catalog1
 ```
 
 ## Development
