@@ -44,6 +44,7 @@ from data_replication.exceptions import ConfigurationError
 from data_replication.providers.provider_factory import ProviderFactory
 from data_replication.utils import (
     create_spark_session,
+    get_spark_workspace_url,
     validate_spark_session,
     get_workspace_url_from_host,
 )
@@ -55,7 +56,6 @@ def create_logger(config) -> DataReplicationLogger:
     if hasattr(config, "logging") and config.logging:
         logger.setup_logging(config.logging)
     return logger
-
 
 
 def run_backup(
@@ -72,14 +72,20 @@ def run_backup(
         source_cluster_id = config.source_databricks_connect_config.cluster_id
         # create and validate Spark sessions
         spark = create_spark_session(
-            source_host, source_secret_config, source_cluster_id, workspace_client, source_auth_type
+            source_host,
+            source_secret_config,
+            source_cluster_id,
+            workspace_client,
+            source_auth_type,
         )
         if not validate_spark_session(spark, get_workspace_url_from_host(source_host)):
             logger.error(
                 "Spark session is not connected to the configured source workspace"
             )
             raise ConfigurationError(
-                "Spark session is not connected to the configured source workspace"
+                f"Spark session is not connected to the configured source workspace."
+                f"Expected: {get_workspace_url_from_host(source_host)}, "
+                f"Actual: {get_spark_workspace_url(spark)}"
             )
 
     backup_factory = ProviderFactory(
@@ -109,14 +115,20 @@ def run_replication(
         target_secret_config = config.target_databricks_connect_config.token
         target_cluster_id = config.target_databricks_connect_config.cluster_id
         spark = create_spark_session(
-            target_host, target_secret_config, target_cluster_id, workspace_client, target_auth_type
+            target_host,
+            target_secret_config,
+            target_cluster_id,
+            workspace_client,
+            target_auth_type,
         )
         if not validate_spark_session(spark, get_workspace_url_from_host(target_host)):
             logger.error(
                 "Spark session is not connected to the configured target workspace"
             )
             raise ConfigurationError(
-                "Spark session is not connected to the configured target workspace"
+                f"Spark session is not connected to the configured target workspace. "
+                f"Expected: {get_workspace_url_from_host(target_host)}, "
+                f"Actual: {get_spark_workspace_url(spark)}"
             )
 
     replication_factory = ProviderFactory(
@@ -145,14 +157,20 @@ def run_reconciliation(
         target_secret_config = config.target_databricks_connect_config.token
         target_cluster_id = config.target_databricks_connect_config.cluster_id
         spark = create_spark_session(
-            target_host, target_secret_config, target_cluster_id, workspace_client, target_auth_type
+            target_host,
+            target_secret_config,
+            target_cluster_id,
+            workspace_client,
+            target_auth_type,
         )
         if not validate_spark_session(spark, get_workspace_url_from_host(target_host)):
             logger.error(
                 "Spark session is not connected to the configured target workspace"
             )
             raise ConfigurationError(
-                "Spark session is not connected to the configured target workspace"
+                f"Spark session is not connected to the configured target workspace. "
+                f"Expected: {get_workspace_url_from_host(target_host)}, "
+                f"Actual: {get_spark_workspace_url(spark)}"
             )
 
     reconciliation_factory = ProviderFactory(
@@ -168,7 +186,6 @@ def run_reconciliation(
 
     logger.info("All reconciliation operations completed successfully")
     return 0
-
 
 
 def main():
@@ -215,16 +232,13 @@ def main():
             run_id = args.run_id
 
         w = WorkspaceClient()
-        default_workspace_url = w.config.host
         default_user = w.current_user.me().user_name
         if not EXECUTED_IN_WORKSPACE:
             logger.info("Running from external non-Databricks environment")
         else:
             logger.info("Running from Databricks environment")
 
-        logger.info(
-            f"Connecting to default workspace {default_workspace_url} as user {default_user}"
-        )
+        logger.info(f"Connecting to default workspace as user {default_user}")
 
         if config.audit_config.logging_workspace == "source":
             logging_host = config.source_databricks_connect_config.host
@@ -237,8 +251,13 @@ def main():
             logging_secret_config = config.target_databricks_connect_config.token
             logging_cluster_id = config.target_databricks_connect_config.cluster_id
 
+        # create and validate logging Spark session
         logging_spark = create_spark_session(
-            logging_host, logging_secret_config, logging_cluster_id, w, logging_auth_type
+            logging_host,
+            logging_secret_config,
+            logging_cluster_id,
+            w,
+            logging_auth_type,
         )
         logging_workspace_url = get_workspace_url_from_host(logging_host)
 
@@ -248,7 +267,7 @@ def main():
             )
             raise ConfigurationError(
                 f"""Logging Spark session is not connected to the configured logging workspace. "
-                Expected: {logging_workspace_url}"""
+                Expected: {logging_workspace_url}, Actual: {get_spark_workspace_url(logging_spark)}"""
             )
 
         logger.debug(f"Config: {config}")

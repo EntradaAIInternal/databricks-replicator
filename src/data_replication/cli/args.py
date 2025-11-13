@@ -162,6 +162,7 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--validate-only",
+        "-v",
         action="store_true",
         help="Only validate configuration without running operations",
     )
@@ -170,24 +171,28 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--target-catalogs",
+        "-tc",
         type=str,
         help="comma-separated list of target catalog names, e.g. catalog1,catalog2",
     )
 
     parser.add_argument(
         "--target-schemas",
+        "-ts",
         type=str,
         help="list of schemas separated by comma, e.g. schema1,schema2",
     )
 
     parser.add_argument(
         "--target-tables",
+        "-tb",
         type=str,
         help="list of tables separated by comma, e.g. table1,table2",
     )
 
     parser.add_argument(
         "--concurrency",
+        "-con",
         type=int,
         default=4,
         help="maximum number of concurrent tasks, default is 4",
@@ -195,14 +200,16 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--uc-object-types",
+        "-uc",
         type=str,
         help="comma-separated list of UC metadata types to replicate. "
              "Acceptable values: all,catalog,catalog_tag,schema,schema_tag,"
-             "view_tag,table_tag,column_tag,volume,volume_tag",
+             "view_tag,table_tag,column_tag,volume,volume_tag,column_comment",
     )
 
     parser.add_argument(
         "--table-types",
+        "-tt",
         type=str,
         help="comma-separated list of table types to process. "
              "Acceptable values: managed,external,streaming_table",
@@ -210,6 +217,7 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--volume-types",
+        "-vt",
         type=str,
         help="comma-separated list of volume types to process. "
              "Acceptable values: all,managed,external",
@@ -217,6 +225,7 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--logging-level",
+        "-ll",
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level. Acceptable values: DEBUG,INFO,WARNING,ERROR,CRITICAL",
@@ -224,6 +233,7 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--replication-wait-secs",
+        "-ws",
         type=int,
         default=60,
         help="Wait time for replication operations in seconds. Default is 60 seconds.",
@@ -231,6 +241,7 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--source-host",
+        "-sh",
         type=str,
         help="Source Databricks workspace URL to override config file setting. "
              "e.g. https://adb-123456789.11.azuredatabricks.net/",
@@ -238,6 +249,7 @@ def setup_argument_parser():
 
     parser.add_argument(
         "--target-host",
+        "-th",
         type=str,
         help="Target Databricks workspace URL to override config file setting. "
              "e.g. https://e2-demo-field-eng.cloud.databricks.com/",

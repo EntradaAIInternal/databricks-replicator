@@ -37,18 +37,24 @@ def get_token_from_secret(
         secret_config.secret_pat,
     )
 
+
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=10, max=60))
 def create_spark_session(
     host: str,
-    secret_config: SecretConfig,
-    cluster_id: str,
-    workspace_client: WorkspaceClient,
-    auth_type: AuthType,
+    secret_config: SecretConfig = None,
+    cluster_id: str = None,
+    workspace_client: WorkspaceClient = None,
+    auth_type: AuthType = None,
 ) -> DatabricksSession:
     """Create a Databricks Spark session using the provided host and token."""
     if not host:
         raise ValueError("Host URL must be provided to create Spark session.")
-    os.environ["DATABRICKS_HOST"] = host
+    # Clear any existing environment variables to avoid conflicts
+    os.environ.pop("DATABRICKS_HOST", None)
+    os.environ.pop("DATABRICKS_TOKEN", None)
+    os.environ.pop("DATABRICKS_CLIENT_ID", None)
+    os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+    os.environ.pop("DATABRICKS_CLUSTER_ID", None)
 
     client_id = None
     client_secret = None
@@ -62,20 +68,18 @@ def create_spark_session(
             os.environ["DATABRICKS_CLIENT_SECRET"] = client_secret
         else:
             pat = get_token_from_secret(secret_config, workspace_client, auth_type)
-            os.environ["DATABRICKS_HOST"] = host
             os.environ["DATABRICKS_TOKEN"] = pat
     if cluster_id:
         os.environ["DATABRICKS_CLUSTER_ID"] = cluster_id
-        spark = DatabricksSession.builder.getOrCreate()
-        return spark
     try:
         # Create Databricks session with default compute
-        spark = DatabricksSession.builder.getOrCreate()
-        return spark
+        spark = DatabricksSession.builder.remote(host=host).getOrCreate()
     except Exception:
         # Fallback on Creating Databricks session with serverless compute
-        spark = DatabricksSession.builder.serverless(True).getOrCreate()
-        return spark
+        spark = (
+            DatabricksSession.builder.remote(host=host).serverless(True).getOrCreate()
+        )
+    return spark
 
 
 def get_spark_workspace_url(spark: DatabricksSession) -> str:

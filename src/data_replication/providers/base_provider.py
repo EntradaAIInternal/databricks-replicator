@@ -18,6 +18,7 @@ from pyspark.sql.utils import AnalysisException
 
 from data_replication.utils import retry_with_logging, merge_maps
 
+from ..audit.audit_logger import AuditLogger
 from ..audit.logger import DataReplicationLogger
 from ..config.models import (
     DatabricksConnectConfig,
@@ -55,6 +56,7 @@ class BaseProvider(ABC):
         max_workers: int = 2,
         timeout_seconds: int = 1800,
         external_location_mapping: Optional[dict] = None,
+        audit_logger: Optional[AuditLogger] = None,
     ):
         """
         Initialize the base provider.
@@ -83,6 +85,7 @@ class BaseProvider(ABC):
         self.max_workers = max_workers
         self.timeout_seconds = timeout_seconds
         self.external_location_mapping = external_location_mapping
+        self.audit_logger = audit_logger
         self.catalog_name: Optional[str] = None
         self.source_spark = None
         self.source_dbops = None
@@ -279,6 +282,9 @@ class BaseProvider(ABC):
                 )
                 results.extend(schema_results)
 
+                # Log results after processing each schema
+                self._log_schema_results(schema_results, schema_name)
+
         except Exception as e:
             result = self._handle_exception(
                 e,
@@ -290,14 +296,6 @@ class BaseProvider(ABC):
                 start_time,
             )
             results.append(result)
-
-        self._log_summary(
-            start_time,
-            results,
-            self.get_operation_name(),
-            self.catalog_config.catalog_name,
-            schema_name="ALL",
-        )
 
         return results
 
@@ -358,119 +356,13 @@ class BaseProvider(ABC):
 
             # Process all tables first
             if tables:
-                self.logger.info(
-                    f"starting {self.get_operation_name()} of {len(tables)} tables in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
-                )
-                self.logger.info(f"Tables: {tables}")
-
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    # Submit table processing jobs
-                    future_to_table = {
-                        executor.submit(
-                            self.process_table, schema_name, table_name
-                        ): table_name
-                        for table_name in tables
-                    }
-
-                    # Collect table results
-                    for future in as_completed(future_to_table):
-                        table_name = future_to_table[future]
-                        try:
-                            result = future.result(timeout=self.timeout_seconds)
-
-                            # Handle case where process_table returns a list of results
-                            if isinstance(result, list):
-                                results.extend(result)
-                                # Check if any result in the list failed
-                                for single_result in result:
-                                    if single_result.status != "success":
-                                        self.logger.error(
-                                            f"Failed to process table "
-                                            f"{catalog_name}.{schema_name}.{table_name}: "
-                                            f"{single_result.error_message}"
-                                        )
-                            else:
-                                results.append(result)
-                                if result.status != "success":
-                                    self.logger.error(
-                                        f"Failed to process table "
-                                        f"{catalog_name}.{schema_name}.{table_name}: "
-                                        f"{result.error_message}"
-                                    )
-
-                        except Exception as e:
-                            result = self._handle_exception(
-                                e,
-                                "processing table",
-                                catalog_name,
-                                schema_name,
-                                table_name,
-                                "table",
-                                start_time,
-                            )
-                            results.append(result)
-
-                self.logger.info(
-                    f"All tables processed in schema {self.catalog_name}.{schema_name}"
-                )
+                table_results = self._process_tables(schema_name, tables, catalog_name, start_time)
+                results.extend(table_results)
 
             # Process all volumes after tables are complete
             if volumes:
-                self.logger.info(
-                    f"starting {self.get_operation_name()} of {len(volumes)} volumes in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
-                )
-                self.logger.info(f"Volumes: {volumes}")
-
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    # Submit volume processing jobs
-                    future_to_volume = {
-                        executor.submit(
-                            self.process_volume, schema_name, volume_name
-                        ): volume_name
-                        for volume_name in volumes
-                    }
-
-                    # Collect volume results
-                    for future in as_completed(future_to_volume):
-                        volume_name = future_to_volume[future]
-                        try:
-                            result = future.result(timeout=self.timeout_seconds)
-
-                            # Handle case where process_table returns a list of results
-                            if isinstance(result, list):
-                                results.extend(result)
-                                # Check if any result in the list failed
-                                for single_result in result:
-                                    if single_result.status != "success":
-                                        self.logger.error(
-                                            f"Failed to process volume "
-                                            f"{catalog_name}.{schema_name}.{volume_name}: "
-                                            f"{single_result.error_message}"
-                                        )
-                            else:
-                                results.append(result)
-                                if result.status != "success":
-                                    self.logger.error(
-                                        f"Failed to process volume "
-                                        f"{catalog_name}.{schema_name}.{volume_name}: "
-                                        f"{result.error_message}"
-                                    )
-
-                        except Exception as e:
-                            result = self._handle_exception(
-                                e,
-                                "processing volume",
-                                catalog_name,
-                                schema_name,
-                                volume_name,
-                                "volume",
-                                start_time,
-                            )
-                            results.append(result)
-
-                self.logger.info(
-                    f"All volumes processed in schema {self.catalog_name}.{schema_name}"
-                )
+                volume_results = self._process_volumes(schema_name, volumes, catalog_name, start_time)
+                results.extend(volume_results)
 
         except Exception as e:
             result = self._handle_exception(
@@ -484,10 +376,164 @@ class BaseProvider(ABC):
             )
             results.append(result)
 
-        self._log_summary(
-            start_time, results, self.get_operation_name(), catalog_name, schema_name
-        )
+        return results
 
+    def _process_tables(
+        self, 
+        schema_name: str, 
+        tables: List[str], 
+        catalog_name: str, 
+        start_time: datetime
+    ) -> List[RunResult]:
+        """
+        Process all tables in a schema using ThreadPoolExecutor.
+
+        Args:
+            schema_name: Schema name to process
+            tables: List of table names to process
+            catalog_name: Catalog name for error handling
+            start_time: Operation start time for error handling
+
+        Returns:
+            List of RunResult objects for each table operation
+        """
+        results: List[RunResult] = []
+        
+        self.logger.info(
+            f"starting {self.get_operation_name()} of {len(tables)} tables in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
+        )
+        self.logger.info(f"Tables: {tables}")
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit table processing jobs
+            future_to_table = {
+                executor.submit(
+                    self.process_table, schema_name, table_name
+                ): table_name
+                for table_name in tables
+            }
+
+            # Collect table results
+            for future in as_completed(future_to_table):
+                table_name = future_to_table[future]
+                try:
+                    result = future.result(timeout=self.timeout_seconds)
+
+                    # Handle case where process_table returns a list of results
+                    if isinstance(result, list):
+                        results.extend(result)
+                        # Check if any result in the list failed
+                        for single_result in result:
+                            if single_result.status != "success":
+                                self.logger.error(
+                                    f"Failed to process table "
+                                    f"{catalog_name}.{schema_name}.{table_name}: "
+                                    f"{single_result.error_message}"
+                                )
+                    else:
+                        results.append(result)
+                        if result.status != "success":
+                            self.logger.error(
+                                f"Failed to process table "
+                                f"{catalog_name}.{schema_name}.{table_name}: "
+                                f"{result.error_message}"
+                            )
+
+                except Exception as e:
+                    result = self._handle_exception(
+                        e,
+                        "processing table",
+                        catalog_name,
+                        schema_name,
+                        table_name,
+                        "table",
+                        start_time,
+                    )
+                    results.append(result)
+
+        self.logger.info(
+            f"All tables processed in schema {self.catalog_name}.{schema_name}"
+        )
+        
+        return results
+
+    def _process_volumes(
+        self, 
+        schema_name: str, 
+        volumes: List[str], 
+        catalog_name: str, 
+        start_time: datetime
+    ) -> List[RunResult]:
+        """
+        Process all volumes in a schema using ThreadPoolExecutor.
+
+        Args:
+            schema_name: Schema name to process
+            volumes: List of volume names to process
+            catalog_name: Catalog name for error handling
+            start_time: Operation start time for error handling
+
+        Returns:
+            List of RunResult objects for each volume operation
+        """
+        results: List[RunResult] = []
+        
+        self.logger.info(
+            f"starting {self.get_operation_name()} of {len(volumes)} volumes in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
+        )
+        self.logger.info(f"Volumes: {volumes}")
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit volume processing jobs
+            future_to_volume = {
+                executor.submit(
+                    self.process_volume, schema_name, volume_name
+                ): volume_name
+                for volume_name in volumes
+            }
+
+            # Collect volume results
+            for future in as_completed(future_to_volume):
+                volume_name = future_to_volume[future]
+                try:
+                    result = future.result(timeout=self.timeout_seconds)
+
+                    # Handle case where process_volume returns a list of results
+                    if isinstance(result, list):
+                        results.extend(result)
+                        # Check if any result in the list failed
+                        for single_result in result:
+                            if single_result.status != "success":
+                                self.logger.error(
+                                    f"Failed to process volume "
+                                    f"{catalog_name}.{schema_name}.{volume_name}: "
+                                    f"{single_result.error_message}"
+                                )
+                    else:
+                        results.append(result)
+                        if result.status != "success":
+                            self.logger.error(
+                                f"Failed to process volume "
+                                f"{catalog_name}.{schema_name}.{volume_name}: "
+                                f"{result.error_message}"
+                            )
+
+                except Exception as e:
+                    result = self._handle_exception(
+                        e,
+                        "processing volume",
+                        catalog_name,
+                        schema_name,
+                        volume_name,
+                        "volume",
+                        start_time,
+                    )
+                    results.append(result)
+
+        self.logger.info(
+            f"All volumes processed in schema {self.catalog_name}.{schema_name}"
+        )
+        
         return results
 
     def _create_failed_result(
@@ -669,45 +715,60 @@ class BaseProvider(ABC):
             self.catalog_config.volume_types,
         )
 
-    def _log_summary(
-        self,
-        start_time: datetime,
-        results: List[RunResult],
-        operation_type: str = "operation",
-        catalog_name: str = "",
-        schema_name: str = "",
-    ):
+    def _log_schema_results(self, schema_results: List[RunResult], schema_name: str) -> None:
         """
-        log a run summary at schema level.
-
+        Log results after processing each schema to audit table.
+        
         Args:
-            start_time: Operation start time
-            results: List of operation results
-            operation_type: Type of operation (backup, replication, etc.)
-            error_message: Optional error message
+            schema_results: List of RunResult objects from schema processing
+            schema_name: Name of the processed schema
         """
-        end_time = datetime.now(timezone.utc)
-        duration = (end_time - start_time).total_seconds()
+        if not schema_results:
+            return
+            
+        # Log each individual result to the audit table if audit logger is available
+        if self.audit_logger:
+            import json
+            for result in schema_results:
+                try:
+                    details_str = None
+                    if result.details:
+                        details_str = json.dumps(result.details)
 
-        # Calculate summary statistics
-        successful_operations = sum(1 for r in results if r.status == "success")
-        total_operations = len(results)
+                    # Parse string timestamps back to datetime objects
+                    start_dt = datetime.fromisoformat(result.start_time.replace("Z", "+00:00"))
+                    end_dt = datetime.fromisoformat(result.end_time.replace("Z", "+00:00"))
+                    duration = (end_dt - start_dt).total_seconds()
 
-        success_rate = (
-            (successful_operations / total_operations * 100)
-            if total_operations > 0
-            else 0
+                    self.audit_logger.log_operation(
+                        operation_type=result.operation_type,
+                        catalog_name=result.catalog_name,
+                        schema_name=result.schema_name or "",
+                        object_name=result.object_name or "",
+                        object_type=result.object_type or "",
+                        status=result.status,
+                        start_time=start_dt,
+                        end_time=end_dt,
+                        duration_seconds=duration,
+                        error_message=result.error_message,
+                        details=details_str,
+                        attempt_number=getattr(result, "attempt_number", 1),
+                        max_attempts=getattr(result, "max_attempts", 1),
+                    )
+                except Exception as audit_error:
+                    table_info = f"{result.catalog_name}.{result.schema_name}.{result.object_name}"
+                    self.logger.warning(
+                        f"Failed to write audit log for {table_info}: {str(audit_error)}"
+                    )
+        
+        # Log summary info to regular logger
+        successful = sum(1 for r in schema_results if r.status == "success")
+        total = len(schema_results)
+        
+        self.logger.info(
+            f"Completed {self.get_operation_name()} for schema {self.catalog_name}.{schema_name}: "
+            f"{successful}/{total} operations successful"
         )
-        summary_text = (
-            f"Catalog: {catalog_name}, Schema: {schema_name}\n"
-            f"{operation_type.title()} operation completed in {duration:.1f}s. "
-            f"Success rate: {successful_operations}/"
-            f"{total_operations} ({success_rate:.1f}%)"
-        )
-
-        self.logger.info(summary_text)
-
-        return None
 
     def _create_tagging_operation(self):
         """Create a tagging operation function with retry and logging."""

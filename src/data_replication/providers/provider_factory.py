@@ -160,68 +160,8 @@ class ProviderFactory:
             max_workers,
             timeout_seconds,
             self.config.external_location_mapping,
+            self.audit_logger,
         )
-
-    def log_run_result(self, result: RunResult) -> None:
-        """
-        Log a RunResult to the configured audit table.
-
-        Args:
-            result: RunResult object to log
-        """
-        try:
-            details_str = None
-            if result.details:
-                details_str = json.dumps(result.details)
-
-            # Parse string timestamps back to datetime objects
-            start_dt = datetime.fromisoformat(result.start_time.replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(result.end_time.replace("Z", "+00:00"))
-            duration = (end_dt - start_dt).total_seconds()
-
-            # Log to standard logger
-            table_info = (
-                f"{result.catalog_name}.{result.schema_name}.{result.object_name}"
-            )
-            # self.logger.info(
-            #     f"Operation {result.operation_type} {result.status} for {table_info}"
-            # )
-
-            # Log to audit table if AuditLogger is available
-            if self.audit_logger:
-                try:
-                    self.audit_logger.log_operation(
-                        operation_type=result.operation_type,
-                        catalog_name=result.catalog_name,
-                        schema_name=result.schema_name or "",
-                        object_name=result.object_name or "",
-                        object_type=result.object_type or "",
-                        status=result.status,
-                        start_time=start_dt,
-                        end_time=end_dt,
-                        duration_seconds=duration,
-                        error_message=result.error_message,
-                        details=details_str,
-                        attempt_number=getattr(result, "attempt_number", 1),
-                        max_attempts=getattr(result, "max_attempts", 1),
-                    )
-                except Exception as audit_error:
-                    self.logger.warning(
-                        f"Failed to write audit log for {table_info}: {str(audit_error)}"
-                    )
-
-        except Exception as e:
-            self.logger.error(f"Failed to log run result: {str(e)}", exc_info=True)
-
-    def log_run_results(self, results: List[RunResult]) -> None:
-        """
-        Log multiple RunResult objects to all configured audit tables.
-
-        Args:
-            results: List of RunResult objects to log
-        """
-        for result in results:
-            self.log_run_result(result)
 
     def create_summary(
         self,
@@ -381,8 +321,6 @@ class ProviderFactory:
 
             summary = self.create_summary(start_time, results, operation_name)
 
-            # Log individual results
-            self.log_run_results(results)
             # Log final summary
             self.log_run_summary(summary, operation_name)
 
