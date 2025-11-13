@@ -196,6 +196,8 @@ def main():
             table_types_override=table_types_override,
             volume_types_override=volume_types_override,
             logging_level_override=args.logging_level,
+            source_host_override=args.source_host,
+            target_host_override=args.target_host,
         )
         logger = create_logger(config)
 

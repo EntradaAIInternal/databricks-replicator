@@ -229,6 +229,20 @@ def setup_argument_parser():
         help="Wait time for replication operations in seconds. Default is 60 seconds.",
     )
 
+    parser.add_argument(
+        "--source-host",
+        type=str,
+        help="Source Databricks workspace URL to override config file setting. "
+             "e.g. https://adb-123456789.11.azuredatabricks.net/",
+    )
+
+    parser.add_argument(
+        "--target-host",
+        type=str,
+        help="Target Databricks workspace URL to override config file setting. "
+             "e.g. https://e2-demo-field-eng.cloud.databricks.com/",
+    )
+
     return parser
 
 
@@ -259,4 +273,11 @@ def parse_and_validate_args():
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     
-    return args, operations, uc_object_types_override, table_types_override, volume_types_override, config_path
+    return (
+        args,
+        operations,
+        uc_object_types_override,
+        table_types_override,
+        volume_types_override,
+        config_path,
+    )

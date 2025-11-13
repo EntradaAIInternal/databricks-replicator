@@ -158,6 +158,11 @@ data-replicator <config.yaml> --operation reconciliation --target-catalogs catal
 # Run multiple specific operations
 data-replicator <config.yaml> --operation backup,replication --target-catalogs catalog1
 data-replicator <config.yaml> --operation replication,reconciliation --target-catalogs catalog1
+
+# Override workspace URLs from config file
+data-replicator <config.yaml> --source-host https://adb-123456789.11.azuredatabricks.net/ --target-catalogs catalog1
+data-replicator <config.yaml> --target-host https://e2-demo-field-eng.cloud.databricks.com/ --target-catalogs catalog1
+data-replicator <config.yaml> --source-host https://source-workspace.cloud.databricks.com/ --target-host https://target-workspace.cloud.databricks.com/ --target-catalogs catalog1
 ```
 
 ## Development

@@ -41,6 +41,8 @@ class ConfigLoader:
         table_types_override: list = None,
         volume_types_override: list = None,
         logging_level_override: str = None,
+        source_host_override: str = None,
+        target_host_override: str = None,
     ) -> ReplicationSystemConfig:
         """
         Load and validate configuration from a YAML file.
@@ -58,6 +60,10 @@ class ConfigLoader:
             volume_types_override: List of VolumeType enums to override in config
             logging_level_override: Logging level to override in config
                 (e.g., "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+            source_host_override: Source workspace URL to override in config
+                (e.g., "https://adb-123.11.azuredatabricks.net/")
+            target_host_override: Target workspace URL to override in config
+                (e.g., "https://e2-demo-field-eng.cloud.databricks.com/")
 
         Returns:
             Validated ReplicationSystemConfig instance
@@ -310,6 +316,52 @@ class ConfigLoader:
             except ValidationError as e:
                 raise ConfigurationError(
                     f"Invalid logging_level configuration: {e}"
+                ) from e
+
+        # Handle source_host override
+        if source_host_override:
+            try:
+                # Validate URL format
+                if not source_host_override.startswith(("https://", "http://")):
+                    raise ValidationError(
+                        f"Invalid source host URL '{source_host_override}': "
+                        "must start with https:// or http://"
+                    )
+
+                # Override source host in config data
+                if "source_databricks_connect_config" in config_data:
+                    config_data["source_databricks_connect_config"]["host"] = source_host_override
+                else:
+                    raise ValidationError(
+                        "Cannot override source host: source_databricks_connect_config not found in config"
+                    )
+
+            except ValidationError as e:
+                raise ConfigurationError(
+                    f"Invalid source_host configuration: {e}"
+                ) from e
+
+        # Handle target_host override
+        if target_host_override:
+            try:
+                # Validate URL format
+                if not target_host_override.startswith(("https://", "http://")):
+                    raise ValidationError(
+                        f"Invalid target host URL '{target_host_override}': "
+                        "must start with https:// or http://"
+                    )
+
+                # Override target host in config data
+                if "target_databricks_connect_config" in config_data:
+                    config_data["target_databricks_connect_config"]["host"] = target_host_override
+                else:
+                    raise ValidationError(
+                        "Cannot override target host: target_databricks_connect_config not found in config"
+                    )
+
+            except ValidationError as e:
+                raise ConfigurationError(
+                    f"Invalid target_host configuration: {e}"
                 ) from e
 
         try:
