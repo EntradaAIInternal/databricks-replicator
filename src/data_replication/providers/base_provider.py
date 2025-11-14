@@ -245,6 +245,7 @@ class BaseProvider(ABC):
                 uc_object_types_catalog = self.catalog_config.uc_object_types.copy()
                 run_result = self._replicate_catalog_tags()
                 results.extend(run_result)
+                self.audit_logger.log_results(results)
                 if UCObjectType.ALL not in uc_object_types_catalog:
                     uc_object_types_catalog.remove(UCObjectType.CATALOG_TAG)
                 # immediately return if no other object types to process
@@ -273,7 +274,8 @@ class BaseProvider(ABC):
                     uc_object_types_schema = uc_object_types_catalog.copy()
                     run_result = self._replicate_schema_tags(schema_name)
                     results.extend(run_result)
-                    if UCObjectType.ALL not in uc_object_types_catalog:                    
+                    self.audit_logger.log_results(results)
+                    if UCObjectType.ALL not in uc_object_types_catalog:
                         uc_object_types_schema.remove(UCObjectType.SCHEMA_TAG)
                     # continue to next schema if no other object types to process
                     if len(uc_object_types_schema) == 0:
@@ -284,8 +286,14 @@ class BaseProvider(ABC):
                 )
                 results.extend(schema_results)
 
-                # Log results after processing each schema
-                self._log_schema_results(schema_results, schema_name)
+                # Log summary info to regular logger
+                successful = sum(1 for r in schema_results if r.status == "success")
+                total = len(schema_results)
+
+                self.logger.info(
+                    f"Completed {self.get_operation_name()} for schema {self.catalog_name}.{schema_name}: "
+                    f"{successful}/{total} operations successful"
+                )
 
         except Exception as e:
             result = self._handle_exception(
@@ -336,7 +344,8 @@ class BaseProvider(ABC):
                     UCObjectType.TABLE_TAG in self.catalog_config.uc_object_types
                     or UCObjectType.ALL in self.catalog_config.uc_object_types
                     or UCObjectType.COLUMN_TAG in self.catalog_config.uc_object_types
-                    or UCObjectType.COLUMN_COMMENT in self.catalog_config.uc_object_types
+                    or UCObjectType.COLUMN_COMMENT
+                    in self.catalog_config.uc_object_types
                 )
             ) or self.catalog_config.table_types:
                 tables = self._get_tables(schema_name, table_list)
@@ -358,12 +367,16 @@ class BaseProvider(ABC):
 
             # Process all tables first
             if tables:
-                table_results = self._process_tables(schema_name, tables, catalog_name, start_time)
+                table_results = self._process_tables(
+                    schema_name, tables, catalog_name, start_time
+                )
                 results.extend(table_results)
 
             # Process all volumes after tables are complete
             if volumes:
-                volume_results = self._process_volumes(schema_name, volumes, catalog_name, start_time)
+                volume_results = self._process_volumes(
+                    schema_name, volumes, catalog_name, start_time
+                )
                 results.extend(volume_results)
 
         except Exception as e:
@@ -381,11 +394,11 @@ class BaseProvider(ABC):
         return results
 
     def _process_tables(
-        self, 
-        schema_name: str, 
-        tables: List[str], 
-        catalog_name: str, 
-        start_time: datetime
+        self,
+        schema_name: str,
+        tables: List[str],
+        catalog_name: str,
+        start_time: datetime,
     ) -> List[RunResult]:
         """
         Process all tables in a schema using ThreadPoolExecutor.
@@ -400,7 +413,7 @@ class BaseProvider(ABC):
             List of RunResult objects for each table operation
         """
         results: List[RunResult] = []
-        
+
         self.logger.info(
             f"starting {self.get_operation_name()} of {len(tables)} tables in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
         )
@@ -409,9 +422,7 @@ class BaseProvider(ABC):
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit table processing jobs
             future_to_table = {
-                executor.submit(
-                    self.process_table, schema_name, table_name
-                ): table_name
+                executor.submit(self.process_table, schema_name, table_name): table_name
                 for table_name in tables
             }
 
@@ -440,7 +451,7 @@ class BaseProvider(ABC):
                                 f"{catalog_name}.{schema_name}.{table_name}: "
                                 f"{result.error_message}"
                             )
-
+                    self.audit_logger.log_results(results)
                 except Exception as e:
                     result = self._handle_exception(
                         e,
@@ -456,15 +467,15 @@ class BaseProvider(ABC):
         self.logger.info(
             f"All tables processed in schema {self.catalog_name}.{schema_name}"
         )
-        
+
         return results
 
     def _process_volumes(
-        self, 
-        schema_name: str, 
-        volumes: List[str], 
-        catalog_name: str, 
-        start_time: datetime
+        self,
+        schema_name: str,
+        volumes: List[str],
+        catalog_name: str,
+        start_time: datetime,
     ) -> List[RunResult]:
         """
         Process all volumes in a schema using ThreadPoolExecutor.
@@ -479,7 +490,7 @@ class BaseProvider(ABC):
             List of RunResult objects for each volume operation
         """
         results: List[RunResult] = []
-        
+
         self.logger.info(
             f"starting {self.get_operation_name()} of {len(volumes)} volumes in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
         )
@@ -519,7 +530,7 @@ class BaseProvider(ABC):
                                 f"{catalog_name}.{schema_name}.{volume_name}: "
                                 f"{result.error_message}"
                             )
-
+                    self.audit_logger.log_results(results)
                 except Exception as e:
                     result = self._handle_exception(
                         e,
@@ -535,7 +546,7 @@ class BaseProvider(ABC):
         self.logger.info(
             f"All volumes processed in schema {self.catalog_name}.{schema_name}"
         )
-        
+
         return results
 
     def _create_failed_result(
@@ -717,61 +728,6 @@ class BaseProvider(ABC):
             self.catalog_config.volume_types,
         )
 
-    def _log_schema_results(self, schema_results: List[RunResult], schema_name: str) -> None:
-        """
-        Log results after processing each schema to audit table.
-        
-        Args:
-            schema_results: List of RunResult objects from schema processing
-            schema_name: Name of the processed schema
-        """
-        if not schema_results:
-            return
-            
-        # Log each individual result to the audit table if audit logger is available
-        if self.audit_logger:
-            import json
-            for result in schema_results:
-                try:
-                    details_str = None
-                    if result.details:
-                        details_str = json.dumps(result.details)
-
-                    # Parse string timestamps back to datetime objects
-                    start_dt = datetime.fromisoformat(result.start_time.replace("Z", "+00:00"))
-                    end_dt = datetime.fromisoformat(result.end_time.replace("Z", "+00:00"))
-                    duration = (end_dt - start_dt).total_seconds()
-
-                    self.audit_logger.log_operation(
-                        operation_type=result.operation_type,
-                        catalog_name=result.catalog_name,
-                        schema_name=result.schema_name or "",
-                        object_name=result.object_name or "",
-                        object_type=result.object_type or "",
-                        status=result.status,
-                        start_time=start_dt,
-                        end_time=end_dt,
-                        duration_seconds=duration,
-                        error_message=result.error_message,
-                        details=details_str,
-                        attempt_number=getattr(result, "attempt_number", 1),
-                        max_attempts=getattr(result, "max_attempts", 1),
-                    )
-                except Exception as audit_error:
-                    table_info = f"{result.catalog_name}.{result.schema_name}.{result.object_name}"
-                    self.logger.warning(
-                        f"Failed to write audit log for {table_info}: {str(audit_error)}"
-                    )
-        
-        # Log summary info to regular logger
-        successful = sum(1 for r in schema_results if r.status == "success")
-        total = len(schema_results)
-        
-        self.logger.info(
-            f"Completed {self.get_operation_name()} for schema {self.catalog_name}.{schema_name}: "
-            f"{successful}/{total} operations successful"
-        )
-
     def _create_tagging_operation(self):
         """Create a tagging operation function with retry and logging."""
 
@@ -891,13 +847,12 @@ class BaseProvider(ABC):
         """
         try:
             start_time = datetime.now(timezone.utc)
-            object_name = target_catalog
+            object_name = ""
             source_object = f"`{source_catalog}`"
             target_object = f"`{target_catalog}`"
             if schema_name:
                 source_object += f".`{schema_name}`"
                 target_object += f".`{schema_name}`"
-                object_name = schema_name
                 if table_name:
                     source_object += f".`{table_name}`"
                     target_object += f".`{table_name}`"

@@ -7,7 +7,7 @@ different components to log operations to audit tables.
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from databricks.connect import DatabricksSession
 from pyspark.sql.types import (
@@ -19,9 +19,14 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
+
 from data_replication.audit.logger import DataReplicationLogger
 from data_replication.databricks_operations import DatabricksOperations
 from data_replication.utils import get_spark_current_user
+
+from ..config.models import (
+    RunResult,
+)
 
 
 class AuditLogger:
@@ -119,6 +124,100 @@ class AuditLogger:
         """
         self.logger.debug(f"Creating audit table with SQL: {create_table_sql}")
         self.spark.sql(create_table_sql)
+
+    def log_results(self, results: List[RunResult]) -> None:
+        """
+        Log results in bulk to audit table using Spark DataFrame operations.
+
+        Args:
+            results: List of RunResult objects from operations
+        """
+        if not results:
+            return
+
+        audit_data = []
+        current_time = datetime.now(timezone.utc)
+
+        for result in results:
+            try:
+                details_str = None
+                if result.details:
+                    details_str = json.dumps(result.details)
+
+                # Parse string timestamps back to datetime objects
+                start_dt = datetime.fromisoformat(
+                    result.start_time.replace("Z", "+00:00")
+                )
+                end_dt = datetime.fromisoformat(result.end_time.replace("Z", "+00:00"))
+                duration = (end_dt - start_dt).total_seconds()
+
+                audit_record = (
+                    self.run_id,
+                    current_time,
+                    result.operation_type,
+                    result.catalog_name,
+                    result.schema_name or "",
+                    result.object_name or "",
+                    result.object_type or "",
+                    result.status,
+                    start_dt,
+                    end_dt,
+                    duration,
+                    result.error_message,
+                    details_str,
+                    getattr(result, "attempt_number", 1),
+                    getattr(result, "max_attempts", 1),
+                    self.config_details_json,
+                    self.execution_user,
+                )
+                audit_data.append(audit_record)
+
+            except Exception as audit_error:
+                table_info = (
+                    f"{result.catalog_name}.{result.schema_name}.{result.object_name}"
+                )
+                self.logger.warning(
+                    f"Failed to prepare audit log for {table_info}: {str(audit_error)}"
+                )
+
+        if not audit_data:
+            self.logger.warning("No valid audit records to log")
+            return
+
+        # Define schema for bulk insert
+        schema = StructType(
+            [
+                StructField("run_id", StringType(), True),
+                StructField("logging_time", TimestampType(), True),
+                StructField("operation_type", StringType(), True),
+                StructField("catalog_name", StringType(), True),
+                StructField("schema_name", StringType(), True),
+                StructField("object_name", StringType(), True),
+                StructField("object_type", StringType(), True),
+                StructField("status", StringType(), True),
+                StructField("start_time", TimestampType(), True),
+                StructField("end_time", TimestampType(), True),
+                StructField("duration_seconds", DoubleType(), True),
+                StructField("error_message", StringType(), True),
+                StructField("details", StringType(), True),
+                StructField("attempt_number", IntegerType(), True),
+                StructField("max_attempts", IntegerType(), True),
+                StructField("config_details", StringType(), True),
+                StructField("execution_user", StringType(), True),
+            ]
+        )
+
+        try:
+            audit_df = self.spark.createDataFrame(audit_data, schema)
+            audit_df.write.mode("append").saveAsTable(self.audit_table)
+            self.logger.debug(
+                f"Successfully logged {len(audit_data)} records to audit table {self.audit_table}"
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Failed to bulk log to audit table {self.audit_table}: {str(e)}"
+            )
+            raise e
 
     def log_operation(
         self,

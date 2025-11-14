@@ -120,13 +120,13 @@ class ReplicationProvider(BaseProvider):
     def process_volume(self, schema_name: str, volume_name: str) -> RunResult:
         """Process a single volume for replication."""
         results = []
-        # Check for volume replication first
-        if (
-            self.catalog_config.volume_types
-            and len(self.catalog_config.volume_types) > 0
-        ):
-            result = self._replicate_volume(schema_name, volume_name)
-            results.append(result)
+        # # Check for volume replication first
+        # if (
+        #     self.catalog_config.volume_types
+        #     and len(self.catalog_config.volume_types) > 0
+        # ):
+        #     result = self._replicate_volume(schema_name, volume_name)
+        #     results.append(result)
 
         # Check for volume tag replication
         if (
@@ -453,18 +453,18 @@ class ReplicationProvider(BaseProvider):
                 max_attempts=max_attempts,
             )
 
-    def _replicate_volume(self, schema_name: str, volume_name: str) -> List[RunResult]:
-        """
-        Replicate a single volume.
+    # def _replicate_volume(self, schema_name: str, volume_name: str) -> List[RunResult]:
+    #     """
+    #     Replicate a single volume.
 
-        Args:
-            schema_name: Schema name
-            volume_name: Volume name to replicate
+    #     Args:
+    #         schema_name: Schema name
+    #         volume_name: Volume name to replicate
 
-        Returns:
-            RunResult object for the replication operation
-        """
-        pass  # Implementation of volume replication logic goes here
+    #     Returns:
+    #         RunResult object for the replication operation
+    #     """
+    #     return None  # Implementation of volume replication logic goes here
 
     def _build_external_volume_query(
         self, source_volume: str, target_volume: str
