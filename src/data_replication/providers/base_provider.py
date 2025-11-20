@@ -682,7 +682,8 @@ class BaseProvider(ABC):
                         exclude_names = {
                             table.table_name for table in schema_config.exclude_tables
                         }
-                    table_filter_expression = schema_config.table_filter_expression
+                    if schema_config.table_filter_expression:
+                        table_filter_expression = schema_config.table_filter_expression
                     break
 
         if table_list:
