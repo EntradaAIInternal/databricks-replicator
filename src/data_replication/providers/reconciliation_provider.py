@@ -59,10 +59,12 @@ class ReconciliationProvider(BaseProvider):
             and self.catalog_config.reconciliation_config.enabled
         )
 
-    def process_table(self, schema_name: str, table_name: str) -> RunResult:
+    def process_table(self, schema_name: str, table_name: str) -> List[RunResult]:
         """Process a single table for reconciliation."""
-        results = self._reconcile_table(schema_name, table_name)
-        if results:
+        results = []
+        result = self._reconcile_table(schema_name, table_name)
+        if result:
+            results.append(result)
             self.audit_logger.log_results(results)
         return results
 
