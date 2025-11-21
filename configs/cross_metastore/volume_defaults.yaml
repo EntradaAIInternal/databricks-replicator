@@ -1,0 +1,56 @@
+# cli: data-replicator configs/cross_metastore/volume_defaults.yaml --target-catalogs [catalog_name] --target-schemas [schema1,schema2]
+# Steps:
+# 1. Create delta share infrastructure in this tool including recipient, shares and shared catalogs with default system generated names.
+# 2. Add schema share at source
+# 3. Copy files from source volume to target volume using autoloader
+
+version: "1.0"
+
+replication_group: "streaming_tables_defaults"
+
+source_databricks_connect_config:
+  name: "azure"
+  host: "https://adb-984752964297111.11.azuredatabricks.net"
+  token:
+    secret_scope: "test_kr"
+    secret_pat: "pat_source"
+
+target_databricks_connect_config:
+  name: "aws"
+  host: "https://e2-demo-field-eng.cloud.databricks.com"
+  token:
+    secret_scope: "test_kr"
+    secret_pat: "pat_target"
+
+audit_config:
+  audit_table: "data_replication.audit.audit_logging"
+
+volume_types: ["all"]
+backup_config:
+  enabled: true
+  create_recipient: true
+  create_share: true
+  add_to_share: true
+replication_config:
+  enabled: true
+  create_target_catalog: true
+  create_shared_catalog: true
+  volume_config:
+    # Optional: maximum concurrent file copies per volume. default is 10.
+    max_concurrent_copies: 10
+    # Optional: autoloader options dictionary for streaming table replication
+    autoloader_options: null
+    # Optional: streaming timeout in seconds for streaming table replication. default is 43200 seconds (12 hours).
+    streaming_timeout_seconds: 7200
+    # Optional: detailed file ingestion logging outputs table name. default to same as audit catalog and schema
+    file_ingestion_logging_table: "detail_file_ingestion_logging"
+    # Optional: whether to delete existing target data and reload from source. default is false.
+    delete_and_reload: true
+
+concurrency:
+  max_workers: 1
+  timeout_seconds: 1800
+
+retry:
+  max_attempts: 2
+  retry_delay_seconds: 3
