@@ -59,15 +59,6 @@ class ReconciliationProvider(BaseProvider):
             and self.catalog_config.reconciliation_config.enabled
         )
 
-    def process_table(self, schema_name: str, table_name: str) -> List[RunResult]:
-        """Process a single table for reconciliation."""
-        results = []
-        result = self._reconcile_table(schema_name, table_name)
-        if result:
-            results.append(result)
-            self.audit_logger.log_results(results)
-        return results
-
     def _get_filtered_table_reference(self, table_name: str, is_source: bool) -> str:
         """Get table reference with optional filter applied."""
         reconciliation_config = self.catalog_config.reconciliation_config
@@ -120,6 +111,15 @@ class ReconciliationProvider(BaseProvider):
         )
 
         return super().process_schema_concurrently(schema_name, table_list, volume_list)
+
+    def process_table(self, schema_name: str, table_name: str) -> List[RunResult]:
+        """Process a single table for reconciliation."""
+        results = []
+        result = self._reconcile_table(schema_name, table_name)
+        if result:
+            results.append(result)
+            self.audit_logger.log_results(results)
+        return results
 
     def _reconcile_table(
         self,

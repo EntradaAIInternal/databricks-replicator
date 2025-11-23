@@ -19,6 +19,7 @@ from data_replication.config.models import (
     LoggingConfig,
     TableConfig,
     TargetCatalogConfig,
+    VolumeConfig,
     VolumeFilesReplicationConfig,
 )
 from data_replication.utils import merge_dicts_recursive
@@ -37,6 +38,7 @@ class ConfigLoader:
         target_catalog_override: str = None,
         target_schemas_override: str = None,
         target_tables_override: str = None,
+        target_volumes_override: str = None,
         table_filter_expression_override: str = None,
         concurrency_override: int = None,
         uc_object_types_override: list = None,
@@ -62,6 +64,8 @@ class ConfigLoader:
             target_catalog_override: Target catalog name to override in config
             target_tables_override: Comma-separated string of table names
                 (e.g., "table1,table2")
+            target_volumes_override: Comma-separated string of volume names
+                (e.g., "volume1,volume2")
             table_filter_expression_override: SQL filter expression to select tables
                 (e.g., "tableName like 'fact_%'")
             concurrency_override: integer containing concurrency configuration override
@@ -239,10 +243,26 @@ class ConfigLoader:
                         # Use table filter expression instead of explicit tables
                         filter_expression = table_filter_expression_override
 
+                    # Handle target_volumes override
+                    validated_volumes = []
+                    if target_volumes_override:
+                        # Parse comma-separated volume names
+                        volume_names = [
+                            name.strip().lower()
+                            for name in target_volumes_override.split(",")
+                        ]
+
+                        for volume_name in volume_names:
+                            if volume_name:
+                                validated_volumes.append(
+                                    VolumeConfig(volume_name=volume_name)
+                                )
+
                     validated_schemas.append(
                         SchemaConfig(
                             schema_name=schema_name,
                             tables=validated_tables,
+                            volumes=validated_volumes,
                             table_filter_expression=filter_expression,
                         )
                     )

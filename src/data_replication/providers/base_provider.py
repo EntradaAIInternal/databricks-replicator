@@ -336,7 +336,9 @@ class BaseProvider(ABC):
         results: List[RunResult] = []
         catalog_name = self.catalog_config.catalog_name
         start_time = datetime.now(timezone.utc)
-
+        self.logger.debug(
+            f"Processing with config: {self.catalog_config}"
+        )
         try:
             total_objects = 0
             tables = []

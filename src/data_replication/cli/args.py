@@ -141,6 +141,17 @@ def validate_args(args) -> None:
                 f"but got {len(schema_names)}: {', '.join(schema_names)}"
             )
 
+    # Rule: when target-volumes is provided, target-schemas and target-catalogs must be provided
+    if args.target_volumes:
+        if not args.target_schemas:
+            raise ValueError(
+                "When target-volumes is provided, target-schemas must also be provided"
+            )
+        if not args.target_catalogs:
+            raise ValueError(
+                "When target-volumes is provided, target-catalogs must also be provided"
+            )
+
     # Rule: table-filter-expression and target-tables cannot be used together
     if args.table_filter_expression and args.target_tables:
         raise ValueError(
@@ -229,6 +240,13 @@ def setup_argument_parser():
         "-tb",
         type=str,
         help="list of tables separated by comma, e.g. table1,table2",
+    )
+
+    parser.add_argument(
+        "--target-volumes",
+        "-tv",
+        type=str,
+        help="list of volumes separated by comma, e.g. volume1,volume2",
     )
 
     parser.add_argument(

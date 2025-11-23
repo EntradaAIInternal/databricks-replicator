@@ -93,6 +93,77 @@ class ReplicationProvider(BaseProvider):
             and self.catalog_config.replication_config.enabled
         )
 
+    def setup_operation_catalogs(self) -> str:
+        """Setup replication-specific catalogs."""
+        replication_config = self.catalog_config.replication_config
+        if not self.catalog_config.uc_object_types:
+            # Create target catalog if needed
+            if replication_config.create_target_catalog:
+                self.logger.info(
+                    f"""Creating target catalog: {self.catalog_config.catalog_name} at location: {replication_config.target_catalog_location}"""
+                )
+                self.db_ops.create_catalog_if_not_exists(
+                    self.catalog_config.catalog_name,
+                    replication_config.target_catalog_location,
+                )
+            # Create intermediate catalog if needed
+            if (
+                replication_config.create_intermediate_catalog
+                and replication_config.intermediate_catalog
+            ):
+                self.logger.info(
+                    f"""Creating intermediate catalog: {replication_config.intermediate_catalog} at location: {replication_config.intermediate_catalog_location}"""
+                )
+                self.db_ops.create_catalog_if_not_exists(
+                    replication_config.intermediate_catalog,
+                    replication_config.intermediate_catalog_location,
+                )
+
+            # Create source catalog from share if needed
+            if replication_config.create_shared_catalog:
+                sharing_identifier = self.source_databricks_config.sharing_identifier
+                if not sharing_identifier:
+                    sharing_identifier = self.source_dbops.get_metastore_id()
+                provider_name = self.db_ops.get_provider_name(sharing_identifier)
+                self.logger.info(
+                    f"""Creating source catalog from share: {replication_config.source_catalog} using share name: {replication_config.share_name}"""
+                )
+                self.db_ops.create_catalog_using_share_if_not_exists(
+                    replication_config.source_catalog,
+                    provider_name,
+                    replication_config.share_name,
+                )
+                if replication_config.backup_catalog:
+                    self.db_ops.create_catalog_using_share_if_not_exists(
+                        replication_config.backup_catalog,
+                        provider_name,
+                        replication_config.backup_share_name,
+                    )
+
+        return replication_config.source_catalog
+
+    def process_schema_concurrently(
+        self,
+        schema_name: str,
+        table_list: List[TableConfig],
+        volume_list: List[VolumeConfig],
+    ) -> List[RunResult]:
+        """Override to add replication-specific schema setup."""
+        replication_config = self.catalog_config.replication_config
+        if not self.catalog_config.uc_object_types:
+            # Create intermediate schema if needed
+            if replication_config.intermediate_catalog:
+                self.db_ops.create_schema_if_not_exists(
+                    replication_config.intermediate_catalog, schema_name
+                )
+
+            # Create target schema if needed
+            self.db_ops.create_schema_if_not_exists(
+                self.catalog_config.catalog_name, schema_name
+            )
+
+        return super().process_schema_concurrently(schema_name, table_list, volume_list)
+
     def process_table(
         self,
         schema_name: str,
@@ -164,77 +235,6 @@ class ReplicationProvider(BaseProvider):
         if results:
             self.audit_logger.log_results(results)
         return results
-
-    def setup_operation_catalogs(self) -> str:
-        """Setup replication-specific catalogs."""
-        replication_config = self.catalog_config.replication_config
-        if not self.catalog_config.uc_object_types:
-            # Create target catalog if needed
-            if replication_config.create_target_catalog:
-                self.logger.info(
-                    f"""Creating target catalog: {self.catalog_config.catalog_name} at location: {replication_config.target_catalog_location}"""
-                )
-                self.db_ops.create_catalog_if_not_exists(
-                    self.catalog_config.catalog_name,
-                    replication_config.target_catalog_location,
-                )
-            # Create intermediate catalog if needed
-            if (
-                replication_config.create_intermediate_catalog
-                and replication_config.intermediate_catalog
-            ):
-                self.logger.info(
-                    f"""Creating intermediate catalog: {replication_config.intermediate_catalog} at location: {replication_config.intermediate_catalog_location}"""
-                )
-                self.db_ops.create_catalog_if_not_exists(
-                    replication_config.intermediate_catalog,
-                    replication_config.intermediate_catalog_location,
-                )
-
-            # Create source catalog from share if needed
-            if replication_config.create_shared_catalog:
-                sharing_identifier = self.source_databricks_config.sharing_identifier
-                if not sharing_identifier:
-                    sharing_identifier = self.source_dbops.get_metastore_id()
-                provider_name = self.db_ops.get_provider_name(sharing_identifier)
-                self.logger.info(
-                    f"""Creating source catalog from share: {replication_config.source_catalog} using share name: {replication_config.share_name}"""
-                )
-                self.db_ops.create_catalog_using_share_if_not_exists(
-                    replication_config.source_catalog,
-                    provider_name,
-                    replication_config.share_name,
-                )
-                if replication_config.backup_catalog:
-                    self.db_ops.create_catalog_using_share_if_not_exists(
-                        replication_config.backup_catalog,
-                        provider_name,
-                        replication_config.backup_share_name,
-                    )
-
-        return replication_config.source_catalog
-
-    def process_schema_concurrently(
-        self,
-        schema_name: str,
-        table_list: List[TableConfig],
-        volume_list: List[VolumeConfig],
-    ) -> List[RunResult]:
-        """Override to add replication-specific schema setup."""
-        replication_config = self.catalog_config.replication_config
-        if not self.catalog_config.uc_object_types:
-            # Create intermediate schema if needed
-            if replication_config.intermediate_catalog:
-                self.db_ops.create_schema_if_not_exists(
-                    replication_config.intermediate_catalog, schema_name
-                )
-
-            # Create target schema if needed
-            self.db_ops.create_schema_if_not_exists(
-                self.catalog_config.catalog_name, schema_name
-            )
-
-        return super().process_schema_concurrently(schema_name, table_list, volume_list)
 
     def _replicate_table(
         self,
@@ -500,6 +500,7 @@ class ReplicationProvider(BaseProvider):
         Returns:
             RunResult object for the replication operation
         """
+
         start_time = datetime.now(timezone.utc)
         replication_config = self.catalog_config.replication_config
         volume_config = replication_config.volume_config
@@ -511,13 +512,15 @@ class ReplicationProvider(BaseProvider):
         target_path = f"/Volumes/{target_catalog}/{schema_name}/{volume_name}"
         checkpoint_path = f"{target_path}/_checkpoints"
 
-        checkpoint_subfolder = volume_config.folder_path.strip('/') if volume_config.folder_path else "root"
+        checkpoint_subfolder = (
+            volume_config.folder_path.strip("/")
+            if volume_config.folder_path
+            else "root"
+        )
         if volume_config.folder_path:
             source_path = f"{source_path}/{volume_config.folder_path.strip('/')}/"
             target_path = f"{target_path}/{volume_config.folder_path.strip('/')}/"
-            checkpoint_path = (
-                f"{checkpoint_path}/{checkpoint_subfolder}/"
-            )
+            checkpoint_path = f"{checkpoint_path}/{checkpoint_subfolder}/"
 
         # create detail ingestion logging catalog and schema if not exists
         if volume_config.create_file_ingestion_logging_catalog:
@@ -654,12 +657,12 @@ class ReplicationProvider(BaseProvider):
                                         "dbfs:", "", 1
                                     )
 
-                                rel_path = src_file_path.replace(
-                                    source_path, "", 1
+                                rel_path = os.path.relpath(
+                                    src_file_path, source_path
                                 ).lstrip("/")
                                 dst_file_path = f"{target_path}/{rel_path}"
 
-                                dst_dir = "/".join(dst_file_path.split("/")[:-1])
+                                dst_dir = os.path.dirname(dst_file_path)
                                 os.makedirs(dst_dir, exist_ok=True)
 
                                 cmd = f'cp "{src_file_path}" "{dst_file_path}"'
@@ -764,7 +767,8 @@ class ReplicationProvider(BaseProvider):
 
             if result:
                 success_rate = (
-                    (details["total_count"] - details["error_count"]) / details["total_count"]
+                    (details["total_count"] - details["error_count"])
+                    / details["total_count"]
                     if details["total_count"] > 0
                     else 0
                 )

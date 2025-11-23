@@ -70,15 +70,6 @@ class BackupProvider(BaseProvider):
             and self.catalog_config.backup_config.enabled
         )
 
-    def process_table(self, schema_name: str, table_name: str) -> List[RunResult]:
-        """Process a single table for backup."""
-        results = []
-        result = self._backup_table(schema_name, table_name)
-        if result:
-            results.append(result)
-            self.audit_logger.log_results(results)
-        return results
-
     def setup_operation_catalogs(self) -> str:
         """Setup backup-specific catalogs."""
         backup_config = self.catalog_config.backup_config
@@ -240,6 +231,15 @@ class BackupProvider(BaseProvider):
             attempt_number=attempt,
             max_attempts=max_attempts,
         )
+
+    def process_table(self, schema_name: str, table_name: str) -> List[RunResult]:
+        """Process a single table for backup."""
+        results = []
+        result = self._backup_table(schema_name, table_name)
+        if result:
+            results.append(result)
+            self.audit_logger.log_results(results)
+        return results
 
     def _backup_table(
         self,
