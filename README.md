@@ -16,6 +16,7 @@ This system provides incremental data and UC metadata replication capabilities b
   - Volume Files
 - UC metadata
   - Catalogs
+  - Schemas- 
   - Tags (catalog, schema, table, columns, views, volume)
   - Column Comments
   
@@ -23,7 +24,6 @@ This system provides incremental data and UC metadata replication capabilities b
 - UC metadata
   - Storage Credentials
   - External Locations
-  - Schemas
   - Views
   - Volumes
   - Permissions
@@ -141,11 +141,14 @@ data-replicator --help
 # Validate configuration without running
 data-replicator <config.yaml> --validate-only
 
+# Replicate catalog and schema
+data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --target-catalogs aaron_replication --uc-object-types catalog,schema,catalog_tag,schema_tag
+
 # Replicate delta tables for specific schemas
 data-replicator configs/cross_metastore/delta_tables_defaults.yaml --target-catalogs aaron_replication --target-schemas bronze_1,silver_1
 
-# Replicate streaming tables for specific catalog
-data-replicator configs/cross_metastore/streaming_tables_defaults.yaml --target-catalogs aaron_replication,aaron_replication_2
+# Replicate streaming tables for specific catalog - streaming tables must already exist in target
+data-replicator configs/cross_metastore/streaming_tables_defaults.yaml --target-catalogs aaron_replication --target-schemas bronze_1,silver_1
 
 # Replicate volume for specific schema
 data-replicator configs/cross_metastore/volume_defaults.yaml --target-catalogs aaron_replication --target-schemas bronze_1,silver_1
