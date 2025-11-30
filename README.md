@@ -1,4 +1,4 @@
-# UC Replication System for Databricks
+# MultiCloud UC Replication System for Databricks
 
 A Python plug-in solution to replicate UC data & metadata between Databricks envs. Support and accelerate workloads in multi-cloud migration, single-cloud migration, workspace migration, DR, backup and recovery, multi-cloud data mesh.
 
