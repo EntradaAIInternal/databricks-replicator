@@ -181,19 +181,6 @@ class ProviderFactory:
         else:
             raise ValueError(f"Unknown operation type: {self._operation_type}")
 
-        max_workers = 2  # default
-        timeout_seconds = 300  # default
-        if self.config.concurrency:
-            max_workers = self.config.concurrency.max_workers
-            timeout_seconds = self.config.concurrency.timeout_seconds
-
-        # Ensure we have a retry config (providers expect it to be non-None)
-        retry_config = self.config.retry
-        if retry_config is None:
-            # Use default retry config if none provided
-            from ..config.models import RetryConfig
-
-            retry_config = RetryConfig()
 
         return provider_class(
             self.spark,
@@ -204,9 +191,6 @@ class ProviderFactory:
             catalog,
             self.config.source_databricks_connect_config,
             self.config.target_databricks_connect_config,
-            retry_config,
-            max_workers,
-            timeout_seconds,
             self.config.cloud_url_mapping,
             self.audit_logger,
         )
@@ -894,7 +878,7 @@ class ProviderFactory:
         results = []
         operation_name = self.get_operation_name()
 
-        # Process catalogs sequentially, but use concurrency within each schema
+        # Process catalogs sequentially
         for catalog in catalogs:
             try:
                 provider = self.create_provider(catalog)

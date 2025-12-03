@@ -22,6 +22,7 @@ from pyspark.sql.utils import AnalysisException
 from data_replication.utils import (
     filter_common_maps,
     merge_models_recursive,
+    recursive_substitute,
     retry_with_logging,
     merge_maps,
     map_cloud_url,
@@ -68,9 +69,6 @@ class BaseProvider(ABC):
         catalog_config: TargetCatalogConfig,
         source_databricks_config: DatabricksConnectConfig,
         target_databricks_config: DatabricksConnectConfig,
-        retry: Optional[RetryConfig] = None,
-        max_workers: int = 2,
-        timeout_seconds: int = 1800,
         cloud_url_mapping: Optional[dict] = None,
         audit_logger: Optional[AuditLogger] = None,
     ):
@@ -83,7 +81,6 @@ class BaseProvider(ABC):
             db_ops: Databricks operations helper
             run_id: Unique run identifier
             catalog_config: Target catalog configuration
-            retry: Retry configuration
             max_workers: Maximum number of concurrent workers
             timeout_seconds: Timeout for operations
         """
@@ -95,11 +92,8 @@ class BaseProvider(ABC):
         self.catalog_config = catalog_config
         self.source_databricks_config = source_databricks_config
         self.target_databricks_config = target_databricks_config
-        self.retry = (
-            retry if retry else RetryConfig(max_attempts=1, retry_delay_seconds=5)
-        )
-        self.max_workers = max_workers
-        self.timeout_seconds = timeout_seconds
+        self.max_workers = self.catalog_config.concurrency.max_workers
+        self.timeout_seconds = self.catalog_config.concurrency.timeout_seconds
         self.cloud_url_mapping = cloud_url_mapping
         self.audit_logger = audit_logger
         self.catalog_name: Optional[str] = None
@@ -288,13 +282,13 @@ class BaseProvider(ABC):
             self.logger.info(
                 f"Starting {self.get_operation_name()} schemas: {schema_list}"
             )
-
             # Merge schema-level configs into catalog-level config.
             if schema_configs:
                 for i, schema_config in enumerate(schema_configs):
                     schema_configs[i] = merge_models_recursive(
                         deepcopy(self.catalog_config), schema_config
                     )
+            print(schema_configs)  # --- IGNORE ---
 
             for schema_config in schema_configs:
                 self.logger.info(
@@ -304,6 +298,12 @@ class BaseProvider(ABC):
                         "operation": self.get_operation_name(),
                     },
                 )
+
+                schema_config = recursive_substitute(
+                    schema_config, schema_config.schema_name, "{{schema_name}}"
+                )
+
+                print(schema_config)  # --- IGNORE ---
 
                 uc_object_types_schema_processed = (
                     uc_object_types_catalog_processed.copy()
@@ -486,12 +486,13 @@ class BaseProvider(ABC):
         results: List[RunResult] = []
         tables = [table_config.table_name for table_config in table_configs]
         schema_name = schema_config.schema_name
+        concurrency = schema_config.concurrency
         self.logger.info(
-            f"starting {self.get_operation_name()} of {len(tables)} tables in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
+            f"starting {self.get_operation_name()} of {len(tables)} tables in schema {self.catalog_name}.{schema_name} using {concurrency.max_workers} workers"
         )
         self.logger.info(f"Tables: {tables}")
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=concurrency.max_workers) as executor:
             # Submit table processing jobs
             future_to_table = {
                 executor.submit(
@@ -566,12 +567,13 @@ class BaseProvider(ABC):
         results: List[RunResult] = []
         volumes = [volume_config.volume_name for volume_config in volume_configs]
         schema_name = schema_config.schema_name
+        concurrency = schema_config.concurrency
         self.logger.info(
-            f"starting {self.get_operation_name()} of {len(volumes)} volumes in schema {self.catalog_name}.{schema_name} using {self.max_workers} workers"
+            f"starting {self.get_operation_name()} of {len(volumes)} volumes in schema {self.catalog_name}.{schema_name} using {concurrency.max_workers} workers"
         )
         self.logger.info(f"Volumes: {volumes}")
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=concurrency.max_workers) as executor:
             # Submit volume processing jobs
             future_to_volume = {
                 executor.submit(
@@ -763,7 +765,7 @@ class BaseProvider(ABC):
             schema_name,
             table_names,
             schema_config.table_types,
-            self.max_workers,
+            schema_config.concurrency.parallel_table_filter,
         )
         # Then filter by table types
         return [table for table in tables if table.table_name in filtered_table_names]
@@ -815,10 +817,10 @@ class BaseProvider(ABC):
             volume for volume in volumes if volume.volume_name in filtered_volume_names
         ]
 
-    def _create_tagging_operation(self):
+    def _create_tagging_operation(self, retry: RetryConfig):
         """Create a tagging operation function with retry and logging."""
 
-        @retry_with_logging(self.retry, self.logger)
+        @retry_with_logging(retry, self.logger)
         def tagging_operation(
             unset_query: str,
             set_query: str,
@@ -925,6 +927,7 @@ class BaseProvider(ABC):
         table_name: str = None,
         column_name: str = None,
         volume_name: str = None,
+        retry: RetryConfig = None,
     ) -> RunResult:
         """
         Execute tag replication operation for a single table or column.
@@ -960,10 +963,10 @@ class BaseProvider(ABC):
             )
 
             attempt = 1
-            max_attempts = self.retry.max_attempts
+            max_attempts = retry.max_attempts
             last_exception = None
             # Create tagging operation with retry and logging
-            tagging_operation = self._create_tagging_operation()
+            tagging_operation = self._create_tagging_operation(retry)
 
             (
                 uncommon_source_tag_maps_list,
@@ -1105,7 +1108,7 @@ class BaseProvider(ABC):
         target_catalog = self.catalog_config.catalog_name
         object_type = "catalog_tag"
         attempt = 1
-        max_attempts = self.retry.max_attempts
+        max_attempts = self.catalog_config.retry.max_attempts
 
         if not self.source_dbops.if_catalog_exists(
             source_catalog
@@ -1147,6 +1150,7 @@ class BaseProvider(ABC):
             overwrite_tags=replication_config.overwrite_tags,
             source_catalog=source_catalog,
             target_catalog=target_catalog,
+            retry=self.catalog_config.retry,
         )
         run_results.append(run_result)
         return run_results
@@ -1172,7 +1176,7 @@ class BaseProvider(ABC):
         target_catalog = self.catalog_config.catalog_name
         object_type = "schema_tag"
         attempt = 1
-        max_attempts = self.retry.max_attempts
+        max_attempts = schema_config.retry.max_attempts
 
         if not self.source_dbops.if_schema_exists(
             source_catalog, schema_name
@@ -1217,6 +1221,7 @@ class BaseProvider(ABC):
             source_catalog=source_catalog,
             target_catalog=target_catalog,
             schema_name=schema_name,
+            retry=schema_config.retry,
         )
 
         run_results.append(run_result)
@@ -1237,7 +1242,7 @@ class BaseProvider(ABC):
         target_catalog = self.catalog_config.catalog_name
 
         attempt = 1
-        max_attempts = self.retry.max_attempts
+        max_attempts = self.catalog_config.retry.max_attempts
         last_exception = None
 
         dict_for_creation = DICT_FOR_CREATION_CATALOG.copy()
@@ -1440,7 +1445,7 @@ class BaseProvider(ABC):
         target_schema_full_name = f"{target_catalog}.{schema_name}"
 
         attempt = 1
-        max_attempts = self.retry.max_attempts
+        max_attempts = schema_config.retry.max_attempts
         last_exception = None
 
         dict_for_creation = DICT_FOR_CREATION_SCHEMA

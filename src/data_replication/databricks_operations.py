@@ -230,7 +230,7 @@ class DatabricksOperations:
         schema_name: str,
         table_names: List[str],
         table_types: List[TableType],
-        max_workers: int = 4,
+        parallel_table_filter: int = 8,
     ) -> List[str]:
         """
         Filter a list of table names to only include selected types using multithreading.
@@ -240,7 +240,7 @@ class DatabricksOperations:
             schema_name: Name of the schema
             table_names: List of table names to filter
             table_types: List of table types to filter by
-            max_workers: Maximum number of threads to use for parallel processing
+            parallel_table_filter: Maximum number of threads to use for parallel processing
 
         Returns:
             List of table names that are of the selected types
@@ -276,7 +276,7 @@ class DatabricksOperations:
         filtered_tables = []
 
         # Use ThreadPoolExecutor for parallel processing
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=parallel_table_filter) as executor:
             # Submit all table type checks
             future_to_table = {
                 executor.submit(check_table_type, table_name): table_name

@@ -30,6 +30,7 @@ replication_config:
 
 concurrency:
   max_workers: 5
+  parallel_table_filter: 8
   timeout_seconds: 1800
 
 retry:

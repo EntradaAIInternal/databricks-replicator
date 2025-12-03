@@ -267,8 +267,10 @@ target_catalogs:
 
 # Optional: Concurrency settings
 concurrency:
-  # Optional: maximum number of concurrent tasks. default is 4. can be overridden by args
-  max_workers: 4
+  # Optional: no of parallel threads for table and volume replication in a schema. default is 8.
+  max_workers: 8
+  # Optional: no of parallel threads for table filtering in a schema. default is 8.
+  parallel_table_filter: 8
   # Optional: timeout for each task. default is 3600.
   timeout_seconds: 3600
 

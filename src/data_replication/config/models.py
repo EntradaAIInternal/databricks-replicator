@@ -10,7 +10,7 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from data_replication.utils import merge_models_recursive
+from data_replication.utils import merge_models_recursive, recursive_substitute
 
 
 class ExecuteAt(str, Enum):
@@ -48,6 +48,24 @@ class AuthType(str, Enum):
     model_config = ConfigDict(extra="forbid")
     PAT = "pat"
     OAUTH = "oauth"
+
+
+class ConcurrencyConfig(BaseModel):
+    """Configuration for concurrency settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_workers: int = Field(default=8, ge=1, le=64)
+    parallel_table_filter: int = Field(default=8, ge=1, le=64)
+    timeout_seconds: int = Field(default=3600, ge=60)
+
+
+class RetryConfig(BaseModel):
+    """Configuration for retry settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    retry_delay_seconds: int = Field(default=5, ge=1)
 
 
 class UCObjectType(str, Enum):
@@ -242,6 +260,7 @@ class TableConfig(BaseModel):
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
+    retry: Optional[RetryConfig] = None
 
     @field_validator("table_name")
     @classmethod
@@ -259,6 +278,7 @@ class VolumeConfig(BaseModel):
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
+    retry: Optional[RetryConfig] = None
 
     @field_validator("volume_name")
     @classmethod
@@ -284,6 +304,8 @@ class SchemaConfig(BaseModel):
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
+    concurrency: Optional[ConcurrencyConfig] = None
+    retry: Optional[RetryConfig] = None
 
     @field_validator("schema_name")
     @classmethod
@@ -307,21 +329,14 @@ class TargetCatalogConfig(BaseModel):
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
+    concurrency: Optional[ConcurrencyConfig] = None
+    retry: Optional[RetryConfig] = None
 
     @field_validator("catalog_name")
     @classmethod
     def validate_catalog_name(cls, v):
         """Convert catalog name to lowercase."""
         return v.lower() if v else v
-
-
-class ConcurrencyConfig(BaseModel):
-    """Configuration for concurrency settings."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    max_workers: int = Field(default=4, ge=1, le=32)
-    timeout_seconds: int = Field(default=3600, ge=60)
 
 
 class LoggingConfig(BaseModel):
@@ -394,14 +409,6 @@ class ExternalLocationConfig(BaseModel):
         default=None,
         description="List of external location names to replicate. If not provided, all external locations matched in cloud_url_mapping will be replicated",
     )
-
-
-class RetryConfig(BaseModel):
-    """Configuration for retry settings."""
-
-    model_config = ConfigDict(extra="forbid")
-    max_attempts: int = Field(default=3, ge=1, le=10)
-    retry_delay_seconds: int = Field(default=5, ge=1)
 
 
 class EnvironmentConfig(BaseModel):
@@ -624,40 +631,22 @@ class ReplicationSystemConfig(BaseModel):
         Dynamically processes all string fields in config objects.
         """
 
-        def replace_in_object(obj, catalog_name: str):
-            """Recursively replace placeholders in all string fields of an object."""
-            if obj is None:
-                return
+        for i, catalog in enumerate(self.target_catalogs):
+            # Replace {{catalog_name}} in all catalog configs
+            catalog = recursive_substitute(
+                catalog, catalog.catalog_name, "{{catalog_name}}"
+            )
+            # Replace {{source_name}} in all catalog configs
+            catalog = recursive_substitute(
+                catalog, self.source_databricks_connect_config.name, "{{source_name}}"
+            )
+            # Replace {{target_name}} in all catalog configs
+            catalog = recursive_substitute(
+                catalog, self.target_databricks_connect_config.name, "{{target_name}}"
+            )
 
-            # Get all fields from the model
-            for field_name, field_value in obj.__dict__.items():
-                if isinstance(field_value, str):
-                    field_value_tmp = field_value.strip()
-                    # Replace placeholders
-                    if "{target_catalogs.catalog_name}" in field_value_tmp:
-                        field_value_tmp = field_value_tmp.replace(
-                            "{target_catalogs.catalog_name}", catalog_name
-                        )
-                    if "{source_databricks_connect_config.name}" in field_value_tmp:
-                        field_value_tmp = field_value_tmp.replace(
-                            "{source_databricks_connect_config.name}",
-                            self.source_databricks_connect_config.name,
-                        )
-                    if "{target_databricks_connect_config.name}" in field_value_tmp:
-                        field_value_tmp = field_value_tmp.replace(
-                            "{target_databricks_connect_config.name}",
-                            self.target_databricks_connect_config.name,
-                        )
-                    setattr(obj, field_name, field_value_tmp)
-                elif isinstance(field_value, BaseModel):
-                    # Recursively process nested BaseModel objects
-                    replace_in_object(field_value, catalog_name)
-
-        for catalog in self.target_catalogs:
-            # Replace in all config objects
-            replace_in_object(catalog.backup_config, catalog.catalog_name)
-            replace_in_object(catalog.replication_config, catalog.catalog_name)
-            replace_in_object(catalog.reconciliation_config, catalog.catalog_name)
+            # Update the catalog in the list
+            self.target_catalogs[i] = catalog
 
         return self
 
