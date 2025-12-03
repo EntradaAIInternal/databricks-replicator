@@ -586,6 +586,8 @@ class ReconciliationProvider(BaseProvider):
             ORDER BY column_name
             """
 
+            print(schema_insert_query)  # Debug print
+
             result, last_exception, attempt, max_attempts = reconciliation_operation(
                 schema_insert_query
             )
