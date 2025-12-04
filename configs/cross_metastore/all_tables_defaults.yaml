@@ -30,6 +30,7 @@ replication_config:
 reconciliation_config:
   enabled: true
   create_shared_catalog: true
+  missing_data_check: false
 
 concurrency:
   max_workers: 5

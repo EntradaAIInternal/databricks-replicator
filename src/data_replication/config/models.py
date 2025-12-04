@@ -225,8 +225,8 @@ class ReconciliationConfig(BaseModel):
     recon_outputs_catalog: Optional[str] = None
     recon_outputs_schema: Optional[str] = None
     recon_catalog_location: Optional[str] = None
-    recon_schema_check_table: Optional[str] = 'recon_schema_check'
-    recon_missing_data_table: Optional[str] = 'recon_missing_data'
+    recon_schema_check_table: Optional[str] = "recon_schema_check"
+    recon_missing_data_table: Optional[str] = "recon_missing_data"
     create_shared_catalog: Optional[bool] = False
     share_name: Optional[str] = None
     source_catalog: Optional[str] = None
@@ -237,6 +237,8 @@ class ReconciliationConfig(BaseModel):
     source_filter_expression: Optional[str] = None
     target_filter_expression: Optional[str] = None
     threshold: Optional[float] = 100.0
+    enable_sampling: Optional[bool] = False
+    no_of_sampling_tables: Optional[int] = 10
 
     @field_validator("source_catalog", "recon_outputs_catalog")
     @classmethod
@@ -325,7 +327,7 @@ class TargetCatalogConfig(BaseModel):
     uc_object_types: Optional[List[UCObjectType]] = None
     target_schemas: Optional[List[SchemaConfig]] = None
     exclude_schemas: Optional[List[SchemaConfig]] = None
-    schema_filter_expression: Optional[str] = None
+    schema_table_filter_expression: Optional[str] = None
     backup_config: Optional[BackupConfig] = None
     replication_config: Optional[ReplicationConfig] = None
     reconciliation_config: Optional[ReconciliationConfig] = None
@@ -806,12 +808,20 @@ class ReplicationSystemConfig(BaseModel):
                     f"exactly one of table_types, uc_object_types and volume_types must be provided in catalog: {catalog.catalog_name}"
                 )
 
-            # Ensure only one of schema_filter_expression or target_schemas is provided
-            if catalog.schema_filter_expression and catalog.target_schemas:
+            # Ensure only one of schema_table_filter_expression, or target_schemas or exclude_schemas is provided
+            schema_selection_methods = []
+            if catalog.schema_table_filter_expression:
+                schema_selection_methods.append("schema_table_filter_expression")
+            if catalog.target_schemas:
+                schema_selection_methods.append("target_schemas")
+            if catalog.exclude_schemas:
+                schema_selection_methods.append("exclude_schemas")
+
+            if len(schema_selection_methods) > 1:
                 raise ValueError(
-                    f"""
-                    'schema_filter_expression' and 'target_schemas' must not be provided at the same time in catalog: {catalog.catalog_name}
-            """
+                    f"Only one of 'schema_table_filter_expression', 'target_schemas', or 'exclude_schemas' "
+                    f"can be provided at the same time in catalog: {catalog.catalog_name}. "
+                    f"Found: {', '.join(schema_selection_methods)}"
                 )
 
             # Validate table_filter_expression usage within target_schemas
