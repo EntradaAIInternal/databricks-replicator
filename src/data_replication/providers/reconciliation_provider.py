@@ -83,6 +83,14 @@ class ReconciliationProvider(BaseProvider):
                 reconciliation_config.recon_catalog_location,
             )
 
+            self.logger.info(
+                f"""Creating recon result schema: {reconciliation_config.recon_outputs_schema}"""
+            )
+            self.db_ops.create_schema_if_not_exists(
+                reconciliation_config.recon_outputs_catalog,
+                reconciliation_config.recon_outputs_schema,
+            )            
+
         # Create source catalog from share if needed
         if reconciliation_config.create_shared_catalog:
             sharing_identifier = self.source_databricks_config.sharing_identifier
@@ -98,21 +106,6 @@ class ReconciliationProvider(BaseProvider):
                 reconciliation_config.share_name,
             )
         return reconciliation_config.source_catalog
-
-    def process_schema(
-        self,
-        schema_config: SchemaConfig,
-    ):
-        """Override to add reconciliation-specific schema setup."""
-        reconciliation_config = schema_config.reconciliation_config
-
-        # Ensure reconciliation_results schema exists for consolidated tables
-        self.db_ops.create_schema_if_not_exists(
-            reconciliation_config.recon_outputs_catalog,
-            reconciliation_config.recon_outputs_schema,
-        )
-
-        return super().process_schema(schema_config)
 
     def process_table(
         self, schema_config: SchemaConfig, table_config: TableConfig
