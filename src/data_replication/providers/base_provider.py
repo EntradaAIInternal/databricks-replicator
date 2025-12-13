@@ -550,6 +550,7 @@ class BaseProvider(ABC):
                             UCObjectType.COLUMN_COMMENT,
                             UCObjectType.VIEW,
                             UCObjectType.TABLE,
+                            UCObjectType.TABLE_COMMENT,
                         ]
                     )
                 )
@@ -1222,6 +1223,8 @@ class BaseProvider(ABC):
                 table_types_set.update(
                     ["managed", "external", "streaming_table", "view"]
                 )
+            if UCObjectType.TABLE_COMMENT in schema_config.uc_object_types:
+                table_types_set.update(["managed", "external", "view"])
             if UCObjectType.TABLE in schema_config.uc_object_types:
                 table_types_set.update(["managed", "external"])
             if UCObjectType.VIEW in schema_config.uc_object_types:

@@ -228,6 +228,15 @@ class ReplicationProvider(BaseProvider):
                 )
                 results.extend(result)
             if (
+                UCObjectType.TABLE_COMMENT in self.catalog_config.uc_object_types
+                or UCObjectType.ALL in self.catalog_config.uc_object_types
+            ):
+                result = self._uc_replicate_table_comments(
+                    schema_name,
+                    table_config,
+                )
+                results.extend(result)
+            if (
                 UCObjectType.TABLE_TAG in self.catalog_config.uc_object_types
                 or UCObjectType.ALL in self.catalog_config.uc_object_types
             ):
@@ -237,19 +246,19 @@ class ReplicationProvider(BaseProvider):
                 )
                 results.extend(result)
             if (
-                UCObjectType.COLUMN_TAG in self.catalog_config.uc_object_types
+                UCObjectType.COLUMN_COMMENT in self.catalog_config.uc_object_types
                 or UCObjectType.ALL in self.catalog_config.uc_object_types
             ):
-                result = self._uc_replicate_column_tags(
+                result = self._uc_replicate_column_comments(
                     schema_name,
                     table_config,
                 )
                 results.extend(result)
             if (
-                UCObjectType.COLUMN_COMMENT in self.catalog_config.uc_object_types
+                UCObjectType.COLUMN_TAG in self.catalog_config.uc_object_types
                 or UCObjectType.ALL in self.catalog_config.uc_object_types
             ):
-                result = self._uc_replicate_column_comments(
+                result = self._uc_replicate_column_tags(
                     schema_name,
                     table_config,
                 )
@@ -1191,6 +1200,265 @@ class ReplicationProvider(BaseProvider):
 
         # For regular tables, just return the deep clone query
         return sql
+
+    def _uc_replicate_table_comments(
+        self,
+        schema_name: str,
+        table_config: TableConfig,
+    ) -> List[RunResult]:
+        """
+        Replicate table comments from source to target table.
+
+        Args:
+            schema_name: Schema name
+            table_config: TableConfig object containing table details
+
+        Returns:
+            RunResult object for the table comment replication operation
+        """
+        start_time = datetime.now(timezone.utc)
+        run_results = []
+        table_name = table_config.table_name
+        replication_config = table_config.replication_config
+        source_catalog = replication_config.source_catalog
+        target_catalog = self.catalog_config.catalog_name
+        object_type = "table_comment"
+        source_table = f"`{source_catalog}`.`{schema_name}`.`{table_name}`"
+        target_table = f"`{target_catalog}`.`{schema_name}`.`{table_name}`"
+        max_attempts = table_config.retry.max_attempts
+        attempt = 1
+
+        # Use custom retry decorator with logging
+        @retry_with_logging(table_config.retry, self.logger)
+        def replication_operation(query: str):
+            self.logger.debug(
+                f"Executing table comment replication query: {query}",
+                extra={"run_id": self.run_id, "operation": "replication"},
+            )
+            self.target_spark.sql(query)
+            return True
+
+        try:
+            table_type = self.source_dbops.get_table_type(source_table)
+            if table_type.upper() not in ["VIEW", "MANAGED", "EXTERNAL"]:
+                self.logger.info(
+                    f"Unsupported table type {table_type} are skipped for {source_table} -> {target_table}",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type=object_type,
+                        status="success",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                            "overwrite_comments": replication_config.overwrite_comments,
+                            "table_type": table_type,
+                            "skipped": True,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+            if not replication_config.overwrite_comments:
+                self.logger.info(
+                    f"overwrite_comments is false for {source_table} -> {target_table} ",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type=object_type,
+                        status="success",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                            "overwrite_comments": replication_config.overwrite_comments,
+                            "table_type": table_type,
+                            "skipped": True,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+            if self.source_spark.catalog.tableExists(
+                source_table
+            ) and self.target_spark.catalog.tableExists(target_table):
+                # Get target and source table comments
+                target_comment = self.target_dbops.get_table_comments(
+                    target_catalog, schema_name, table_name
+                )
+                source_comment = self.source_dbops.get_table_comments(
+                    source_catalog, schema_name, table_name
+                )
+
+                if (not source_comment and not target_comment) or (
+                    source_comment == target_comment
+                ):
+                    self.logger.info(
+                        f"No comment change found for: {source_table} -> {target_table}",
+                        extra={"run_id": self.run_id, "operation": "replication"},
+                    )
+                    end_time = datetime.now(timezone.utc)
+                    duration = (end_time - start_time).total_seconds()
+                    run_results.append(
+                        RunResult(
+                            operation_type="uc_replication",
+                            catalog_name=target_catalog,
+                            schema_name=schema_name,
+                            object_name=table_name,
+                            object_type=object_type,
+                            status="success",
+                            start_time=start_time.isoformat(),
+                            end_time=end_time.isoformat(),
+                            duration_seconds=duration,
+                            details={
+                                "source_object": source_table,
+                                "target_object": target_table,
+                                "overwrite_comments": replication_config.overwrite_comments,
+                                "table_type": table_type,
+                                "skipped": True,
+                            },
+                            attempt_number=attempt,
+                            max_attempts=max_attempts,
+                        )
+                    )
+                    return run_results
+
+                query = ""
+                if table_type.upper() == "VIEW":
+                    query = f"""
+                    COMMENT ON VIEW {target_table} IS '{source_comment}'
+                    """
+                if table_type.lower() in ["managed", "external"]:
+                    query = f"""
+                    COMMENT ON TABLE {target_table} IS '{source_comment}'
+                    """
+
+                # Execute the replication
+                result, last_exception, attempt, max_attempts = replication_operation(
+                    query
+                )
+
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+
+                if result:
+                    self.logger.info(
+                        f"{object_type} replication completed successfully: {source_table} -> {target_table} "
+                        f"({duration:.2f}s)",
+                        extra={"run_id": self.run_id, "operation": "replication"},
+                    )
+
+                    run_results.append(
+                        RunResult(
+                            operation_type="uc_replication",
+                            catalog_name=target_catalog,
+                            schema_name=schema_name,
+                            object_name=table_name,
+                            object_type=object_type,
+                            status="success",
+                            start_time=start_time.isoformat(),
+                            end_time=end_time.isoformat(),
+                            duration_seconds=duration,
+                            details={
+                                "source_object": source_table,
+                                "target_object": target_table,
+                                "overwrite_comments": replication_config.overwrite_comments,
+                                "table_type": table_type,
+                            },
+                            attempt_number=attempt,
+                            max_attempts=max_attempts,
+                        )
+                    )
+                    return run_results
+            else:
+                self.logger.warning(
+                    f"Source or target table does not exist for comment replication: `{target_catalog}`.`{schema_name}`.`{table_name}`",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+                run_results.append(
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type="table_comment",
+                        status="failed",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        error_message="Source or Target table does not exist",
+                        details={
+                            "source_object": source_table,
+                            "target_object": target_table,
+                        },
+                        attempt_number=1,
+                        max_attempts=max_attempts,
+                    )
+                )
+                return run_results
+        except Exception as e:
+            last_exception = e
+
+        # Handle failure case
+        end_time = datetime.now(timezone.utc)
+        duration = (end_time - start_time).total_seconds()
+
+        error_msg = f"Table comment replication failed {source_table} -> {target_table}"
+        if last_exception:
+            error_msg += f" | Last error: {str(last_exception)}"
+
+        self.logger.error(
+            error_msg,
+            extra={"run_id": self.run_id, "operation": "replication"},
+        )
+
+        run_results.append(
+            RunResult(
+                operation_type="uc_replication",
+                catalog_name=target_catalog,
+                schema_name=schema_name,
+                object_name=table_name,
+                object_type="table_comment",
+                status="failed",
+                start_time=start_time.isoformat(),
+                end_time=end_time.isoformat(),
+                duration_seconds=duration,
+                error_message=str(last_exception)
+                if last_exception
+                else "Unknown error",
+                details={
+                    "source_object": source_table,
+                    "target_object": target_table,
+                    "overwrite_comments": replication_config.overwrite_comments,
+                },
+                attempt_number=1,
+                max_attempts=max_attempts,
+            )
+        )
+        return run_results
 
     def _uc_replicate_table_tags(
         self,
@@ -2340,7 +2608,9 @@ class ReplicationProvider(BaseProvider):
                 step1_query = re.sub(pattern, "", step1_query, flags=re.IGNORECASE)
             else:
                 # Map external location if needed
-                step1_query = replace_cloud_url(step1_query, self.cloud_url_mapping, first_only=True)
+                step1_query = replace_cloud_url(
+                    step1_query, self.cloud_url_mapping, first_only=True
+                )
         (
             result,
             last_exception,

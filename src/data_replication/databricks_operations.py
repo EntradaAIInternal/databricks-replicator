@@ -1117,8 +1117,19 @@ class DatabricksOperations:
             select collect_list(map(column_name,trim(coalesce(comment, ''))))as comment_maps_list from system.information_schema.columns
             where table_catalog = '{catalog_name}' and table_schema = '{schema_name}' and table_name = '{table_name}'
             group by table_catalog, table_catalog, table_name""").collect()[0][0]
-
         return comment_maps_list
+
+
+    def get_table_comments(self, catalog_name, schema_name, table_name):
+        """
+        Get table comments
+        """
+        table_comment = self.spark.sql(f"""
+            select comment from system.information_schema.tables
+            where table_catalog = '{catalog_name}' and table_schema = '{schema_name}' and table_name = '{table_name}'
+            """).collect()[0][0]
+
+        return table_comment
 
     def get_catalog(self, catalog_name: str) -> CatalogInfo:
         """

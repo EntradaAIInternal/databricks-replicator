@@ -1,4 +1,4 @@
-# cli: data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --target-catalogs [catalog_name] --target-schemas [schema1,schema2] --uc-object-types [table_tag,column_tag]
+# cli: data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --target-catalogs [catalog_name] --target-schemas [schema1,schema2] --uc-object-types all
 # 1. Delta share is not required for uc replication. Both source and target UC should be accessible via Databricks Connect.
 # 2. Replicate source UC metadata objects to target UC.
 # 3. For external tables, use external location mapping specified below

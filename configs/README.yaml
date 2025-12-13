@@ -40,7 +40,7 @@ external_location_config:
 # when table_types is provided, data in tables of specified types will be replicated.
 # when volume_types is provided, files in volumes of specified types will be replicated.
 
-# Optional: replication group level uc object types. 
+# Optional: replication group level uc object types.
 uc_object_types: [
     "all",
     "storage_credential",
@@ -49,22 +49,22 @@ uc_object_types: [
     "catalog_tag",
     "schema",
     "schema_tag",
-    "view",
     "table",
+    "view",
+    "table_comment",
+    "table_tag",
     "volume",
     "volume_tag",
-    "table_tag",
     "column_tag",
     "column_comment",
-    # "table_comment"
     # "permission"
   ]
 
-# Optional: replication group level table types. 
+# Optional: replication group level table types.
 # supported types: all, streaming_table, managed, external.
 table_types: ["all", "managed", "streaming_table", "external"]
 
-# Optional: replication group level volume types. 
+# Optional: replication group level volume types.
 # supported volume types: managed, external.
 # volume_types: ["all","managed", "external"]
 
@@ -260,7 +260,7 @@ target_catalogs:
         exclude_volumes:
           - volume_name: "old_volume"
       - schema_name: "bonze_4"
-      # Optional: WHERE clause condition to select specific tables from {catalog}.{schema}
+        # Optional: WHERE clause condition to select specific tables from {catalog}.{schema}
         # config table_filter_expression and tables at the same time not allowed.
         table_filter_expression: "table_name like 'fact_%' or table_name like 'dim_%'"
     # Optional: exclude_schema list.
