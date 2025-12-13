@@ -23,6 +23,7 @@ This system provides incremental data and UC metadata replication capabilities b
   - Volumes
   - Tables
   - Views
+  - Table/View Comments
   - Tags (catalog, schema, table, columns, views, volume)
   - Column Comments
 ### In Development
