@@ -376,12 +376,12 @@ class BackupProvider(BaseProvider):
                         ]
                     # Prequisite: the executing user is authorized to grant SELECT to itself. i.e. metastore admin or owner of the table
                     # Explicitly grant access to dpm backing table before adding to share
-                    current_user = self.db_ops.get_current_user()
-                    step1_query = f"""GRANT SELECT ON TABLE {actual_source_table}
-                                    TO `{current_user}`;
-                                    """
+                    # current_user = self.db_ops.get_current_user()
+                    # step1_query = f"""GRANT SELECT ON TABLE {actual_source_table}
+                    #                 TO `{current_user}`;
+                    #                 """
                     # Add backing table to share with original table name
-                    step2_query = f"""ALTER SHARE {dpm_backing_table_share_name}
+                    step1_query = f"""ALTER SHARE {dpm_backing_table_share_name}
                                     ADD TABLE {actual_source_table} AS {schema_name}.{table_name};"""
                 else:
                     raise BackupError(
