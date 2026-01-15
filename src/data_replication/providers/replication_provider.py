@@ -406,16 +406,16 @@ class ReplicationProvider(BaseProvider):
                 pipeline_id = table_details["pipeline_id"]
                 dlt_type = table_details["dlt_type"]
                 parent_table_id = table_details.get("parent_table_id")
-                if dlt_type == "dpm":
-                    # Prequisite: the executing user is authorized to grant MODIFY to itself. i.e. metastore admin or owner of the table
-                    # Explicitly grant access to dpm backing table before clone
-                    current_user = self.db_ops.get_current_user()
-                    sql = f"GRANT MODIFY ON TABLE {actual_target_table} TO `{current_user}`"
-                    self.logger.debug(
-                        f"Granting MODIFY on DPM backing table {actual_target_table} to user {current_user}",
-                        extra={"run_id": self.run_id, "operation": "replication"},
-                    )
-                    self.spark.sql(sql)
+                # Prequisite: the executing user must be metastore admin or owner of the pipeline
+                # Commented code block below: Explicitly grant access to dpm backing table not required, as metastore admin by default has MODIFY access to backing table
+                # if dlt_type == "dpm":
+                #     current_user = self.db_ops.get_current_user()
+                #     sql = f"GRANT MODIFY ON TABLE {actual_target_table} TO `{current_user}`"
+                #     self.logger.debug(
+                #         f"Granting MODIFY on DPM backing table {actual_target_table} to user {current_user}",
+                #         extra={"run_id": self.run_id, "operation": "replication"},
+                #     )
+                #     self.spark.sql(sql)
             except TableNotFoundError as exc:
                 table_details = self.db_ops.get_table_details(source_table)
                 if table_details["is_dlt"]:

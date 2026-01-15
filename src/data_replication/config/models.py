@@ -181,6 +181,7 @@ class BackupConfig(BaseModel):
     create_backup_share: Optional[bool] = False
     backup_share_name: Optional[str] = None
     backup_schema_prefix: Optional[str] = None
+    backup_legacy_backing_tables: Optional[bool] = False
     create_dpm_backing_table_share: Optional[bool] = False
     dpm_backing_table_share_name: Optional[str] = None
 

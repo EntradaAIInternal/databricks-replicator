@@ -102,6 +102,8 @@ backup_config:
   create_backup_share: false
   # Optional: share name for streaming table backing table. default to <backup_catalog>_share
   backup_share_name: "__replication_internal_catalog_example_to_aws_share"
+  # Optional: whether to  backup legacy dlt streaming tables to backing table. default is false.
+  backup_legacy_backing_tables: false
   # Optional: whether to create dpm backing table share at source. default is false.
   create_dpm_backing_table_share: false
   # Optional: backing table share name for dpm dlt backing table. default to __replication_internal_dpm_<catalog_name>_to_<target_databricks_connect_config.name>_share
