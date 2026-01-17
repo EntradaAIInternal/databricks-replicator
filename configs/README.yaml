@@ -57,6 +57,8 @@ uc_object_types: [
     "volume_tag",
     "column_tag",
     "column_comment",
+    "materialized_view",
+    "streaming_table"
     # "permission"
   ]
 
@@ -102,6 +104,8 @@ backup_config:
   create_backup_share: false
   # Optional: share name for streaming table backing table. default to <backup_catalog>_share
   backup_share_name: "__replication_internal_catalog_example_to_aws_share"
+  # Optional: whether to  backup legacy dlt streaming tables to backing table. default is false.
+  backup_legacy_backing_tables: false
   # Optional: whether to create dpm backing table share at source. default is false.
   create_dpm_backing_table_share: false
   # Optional: backing table share name for dpm dlt backing table. default to __replication_internal_dpm_<catalog_name>_to_<target_databricks_connect_config.name>_share
@@ -119,8 +123,12 @@ replication_config:
   replicate_enable_predictive_optimization: false
   # Optional: whether to create or replace table during UC table replication. default is false to use create table if not exists.
   create_or_replace_table: false
-  # Optional: whether to create or replace view during UC view replication. default is false to use create view if not exists.
+  # Optional: whether to create or replace view during UC view replication. default is true to use create or replace view.
   create_or_replace_view: true
+  # Optional: whether to create or replace materialized view during UC materialized view replication. default is true to use create or replace materialized view.
+  create_or_replace_materialized_view: true
+  # Optional: whether to create or replace streaming table during UC streaming table replication. default is false.
+  create_or_replace_streaming_table: false
   # Optional: whether to overwrite tags during replication. default is true.
   overwrite_tags: true
   # Optional: whether to overwrite comments during replication. default is true.

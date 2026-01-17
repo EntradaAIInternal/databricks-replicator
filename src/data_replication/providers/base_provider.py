@@ -455,12 +455,17 @@ class BaseProvider(ABC):
                             1
                             for r in schema_results
                             if schema_results and r.status == "skipped"
-                        )                        
+                        )
+                        failed = sum(
+                            1
+                            for r in schema_results
+                            if schema_results and r.status == "failed"
+                        )
                         total = len(schema_results) if schema_results else 0
 
                         self.logger.info(
                             f"Completed {self.get_operation_name()} for schema {self.catalog_name}.{schema_config.schema_name}: "
-                            f"{successful}/{total} operations successful, {skipped}/{total} operations skipped"
+                            f"{successful}/{total} operations successful, {skipped}/{total} operations skipped, {failed}/{total} operations failed"
                         )
 
             if not self.catalog_config.concurrency.process_schemas_in_serial:
@@ -482,11 +487,16 @@ class BaseProvider(ABC):
                             for r in catalog_run_result
                             if catalog_run_result and r.status == "skipped"
                         )
+                        failed = sum(
+                            1
+                            for r in catalog_run_result
+                            if catalog_run_result and r.status == "failed"
+                        )
                         total = len(catalog_run_result) if catalog_run_result else 0
 
                         self.logger.info(
                             f"Completed table {self.get_operation_name()} for catalog {self.catalog_name}: "
-                            f"{successful}/{total} operations successful, {skipped}/{total} operations skipped"
+                            f"{successful}/{total} operations successful, {skipped}/{total} operations skipped, {failed}/{total} operations failed"
                         )
 
                 if schema_volume_list:
@@ -561,6 +571,8 @@ class BaseProvider(ABC):
                             UCObjectType.VIEW,
                             UCObjectType.TABLE,
                             UCObjectType.TABLE_COMMENT,
+                            UCObjectType.MATERIALIZED_VIEW,
+                            UCObjectType.STREAMING_TABLE,
                         ]
                     )
                 )
@@ -685,13 +697,13 @@ class BaseProvider(ABC):
                     for single_result in result:
                         if single_result.status == "failed":
                             self.logger.error(
-                                f"{single_result.status} to {single_result.operation_type} {single_result.object_type}"
+                                f"{single_result.status} to {single_result.operation_type} {single_result.object_type} "
                                 f"{catalog_name}.{schema_name}.{table_name}: "
                                 f"{single_result.error_message}"
                             )
                         if single_result.status == "skipped":
                             self.logger.warning(
-                                f"{single_result.status} to {single_result.operation_type} {single_result.object_type}"
+                                f"{single_result.status} {single_result.operation_type} {single_result.object_type} "
                                 f"{catalog_name}.{schema_name}.{table_name}: "
                                 f"{single_result.error_message}"
                             )
@@ -842,7 +854,7 @@ class BaseProvider(ABC):
                             )
                         if single_result.status == "skipped":
                             self.logger.warning(
-                                f"{single_result.status} to {single_result.operation_type} {single_result.object_type} "
+                                f"{single_result.status} {single_result.operation_type} {single_result.object_type} "
                                 f"{catalog_name}.{schema_name}.{table_name}: "
                                 f"{single_result.error_message}"
                             )
@@ -917,6 +929,12 @@ class BaseProvider(ABC):
                         if single_result.status == "failed":
                             self.logger.error(
                                 f"{single_result.status} to {single_result.operation_type} {single_result.object_type} "
+                                f"{catalog_name}.{schema_name}.{volume_name}: "
+                                f"{single_result.error_message}"
+                            )
+                        if single_result.status == "skipped":
+                            self.logger.warning(
+                                f"{single_result.status} {single_result.operation_type} {single_result.object_type} "
                                 f"{catalog_name}.{schema_name}.{volume_name}: "
                                 f"{single_result.error_message}"
                             )
@@ -1252,7 +1270,13 @@ class BaseProvider(ABC):
             table_types_set = set()
             if UCObjectType.ALL in schema_config.uc_object_types:
                 table_types_set.update(
-                    ["managed", "external", "streaming_table", "view"]
+                    [
+                        "managed",
+                        "external",
+                        "streaming_table",
+                        "view",
+                        "materialized_view",
+                    ]
                 )
             if (
                 UCObjectType.TABLE_TAG in schema_config.uc_object_types
@@ -1260,7 +1284,13 @@ class BaseProvider(ABC):
                 or UCObjectType.COLUMN_COMMENT in schema_config.uc_object_types
             ):
                 table_types_set.update(
-                    ["managed", "external", "streaming_table", "view"]
+                    [
+                        "managed",
+                        "external",
+                        "streaming_table",
+                        "view",
+                        "materialized_view",
+                    ]
                 )
             if UCObjectType.TABLE_COMMENT in schema_config.uc_object_types:
                 table_types_set.update(["managed", "external", "view"])
@@ -1268,6 +1298,10 @@ class BaseProvider(ABC):
                 table_types_set.update(["managed", "external"])
             if UCObjectType.VIEW in schema_config.uc_object_types:
                 table_types_set.update(["view"])
+            if UCObjectType.MATERIALIZED_VIEW in schema_config.uc_object_types:
+                table_types_set.update(["materialized_view"])
+            if UCObjectType.STREAMING_TABLE in schema_config.uc_object_types:
+                table_types_set.update(["streaming_table"])                
             if table_types_set:
                 table_types = list(table_types_set)
 
@@ -1345,7 +1379,7 @@ class BaseProvider(ABC):
         if len(filtered_volume_names) != len(volume_names):
             self.logger.info(
                 f"Exclude {len(volume_names) - len(filtered_volume_names)} volume types unmatched volumes from {len(volume_names)} volumes"
-            )        
+            )
         # Then filter by volume types
         return [
             volume for volume in volumes if volume.volume_name in filtered_volume_names

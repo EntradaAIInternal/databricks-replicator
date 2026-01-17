@@ -8,36 +8,48 @@ Cloud agnostic - cross metastore or same metastore replication
 
 This system provides incremental data and UC metadata replication capabilities between Databricks env or within same env with D2D Delta Share, Deep Clone and Autoloader, with specialized handling for Streaming Tables. It supports multiple operation types that can be run independently or together.
 
-## Object Types
-### Supported Object Types
-- Data Replication
-  - Managed Tables
-  - External Tables
-  - Volume Files
-  - Streaming Tables (data only, no checkpoints)
-- UC metadata
-  - Storage Credentials
-  - External Locations
-  - Catalogs
-  - Schemas
-  - Volumes
-  - Tables
-  - Views
-  - Table/View Comments
-  - Tags (catalog, schema, table, columns, views, volume)
-  - Column Comments
-### In Development
-- UC metadata
-  - Permissions
-  - SQL-based Materialized Views
+## UC Object Types
 
-### Unsupported Object Types
+### UC Metadata
+
+| Object Type | Status | Comments|
+|-------------|--------|------------|
+| Storage Credentials | Supported |
+| External Locations | Supported |
+| Catalogs | Supported |
+| Schemas | Supported |
+| Volumes | Supported |
+| Tables | Supported |
+| Views | Supported |
+| Table/View Comments | Supported |
+| SQL-based Materialized Views | Supported | DLT-based MV should be recreated by DLT in target
+| SQL-based Streaming Tables | Supported | DLT-based ST should be recreated by DLT in target
+| Tags (catalog, schema, table, columns, views, volume) | Supported |
+| Column Comments | Supported |
+| Permissions | In Development |
+| Functions | In Development |
+| Models | In Development |
+| Governed Tag | In Development |
+
+### Data Replication
+
+| Object Type | Status |Comments|
+|-------------|--------|--------|
+| Managed Tables | Supported |
+| External Tables | Supported | Can be replicated as External or Managed
+| Volume Files | Supported |
+| DLT Streaming Tables (data only, no checkpoints) | Supported | checkpoints not replicated. state handling should be managed seperately.
+| DLT Materialized Views | Not Supported | DLT MV should be recomputed by DLT in target
+
+
+### Other Unsupported Objects
 - Databricks Workspace Assets is not yet supported, but maybe considered in future roadmap
-- Streaming checkpoints are not replicated. Streaming state handling should be managed outside this solution.
 - Hive metastore
 
-## Supported Operation Types
-### Backup Operations
+## How Does it Work
+The tool follows a set of operations including backup/publish source tables to delta share, replicate uc metadata, replicate table and reconcile data. How each operation performs is fully configurable in yaml-based file. Below are high-level summary of what each operation does:
+
+### Backup/Publish Operations
 - (Optional if managed by Terraform) Create delta share recipient, create shares and add schemas to share
 - For legacy DLT streaming table, deep clones backing tables from source to backup catalogs and add backup schema to backup share
 - For Default Publishing Mode (DPM) streaming table, add backing table to dpm_backing_tables share directly
@@ -186,8 +198,11 @@ data-replicator configs/cross_metastore/delta_tables_defaults.yaml --target-cata
 # Replicate volume for specific catalogs
 data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --uc-object-types volume --target-catalogs catalog1,catalog2,catalog3 
 
-# Replicate materialized views for specific catalogs (Not yet supported - WIP)
-data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --uc-object-types materialized_view --target-catalogs catalog1,catalog2,catalog3 
+# Replicate sql streaming tables for specific catalogs
+data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --uc-object-types streaming_table --target-catalogs catalog1,catalog2,catalog3
+
+# Replicate sql materialized views for specific catalogs
+data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --uc-object-types materialized_view --target-catalogs catalog1,catalog2,catalog3
 
 # Replicate views for specific catalogs
 data-replicator configs/cross_metastore/uc_metadata_defaults.yaml --uc-object-types view --target-catalogs catalog1,catalog2,catalog3

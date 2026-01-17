@@ -324,6 +324,14 @@ class BackupProvider(BaseProvider):
 
             if dlt_flag:
                 if dlt_type == "legacy" and backup_config.backup_catalog:
+                    if not backup_config.backup_legacy_backing_tables:
+                        self.logger.info(
+                            f"Skipping backup for legacy dlt backing table as per configuration: {source_table}",
+                            extra={"run_id": self.run_id, "operation": "backup"},
+                        )
+                        end_time = datetime.now(timezone.utc)
+                        duration = (end_time - start_time).total_seconds()
+                        return []
                     self.logger.info(
                         f"Starting backup legacy dlt backing table: {source_table} -> {backup_table}",
                         extra={"run_id": self.run_id, "operation": "backup"},
@@ -374,14 +382,14 @@ class BackupProvider(BaseProvider):
                                 max_attempts=max_attempts,
                             )
                         ]
-                    # Prequisite: the executing user is authorized to grant SELECT to itself. i.e. metastore admin or owner of the table
-                    # Explicitly grant access to dpm backing table before adding to share
-                    current_user = self.db_ops.get_current_user()
-                    step1_query = f"""GRANT SELECT ON TABLE {actual_source_table}
-                                    TO `{current_user}`;
-                                    """
+                    # Prequisite: the executing user must be metastore admin or owner of the pipeline
+                    # Commented code block below: Explicitly grant access to dpm backing table before adding to share not required, as metastore admin by default has SELECT access to backing table
+                    # current_user = self.db_ops.get_current_user()
+                    # step1_query = f"""GRANT SELECT ON TABLE {actual_source_table}
+                    #                 TO `{current_user}`;
+                    #                 """
                     # Add backing table to share with original table name
-                    step2_query = f"""ALTER SHARE {dpm_backing_table_share_name}
+                    step1_query = f"""ALTER SHARE {dpm_backing_table_share_name}
                                     ADD TABLE {actual_source_table} AS {schema_name}.{table_name};"""
                 else:
                     raise BackupError(
@@ -392,32 +400,7 @@ class BackupProvider(BaseProvider):
                     f"Skipping backup for non-DLT table: {source_table}",
                     extra={"run_id": self.run_id, "operation": "backup"},
                 )
-                return [
-                    RunResult(
-                        operation_type="backup",
-                        catalog_name=source_catalog,
-                        schema_name=schema_name,
-                        object_name=table_name,
-                        object_type="table",
-                        status="skipped",
-                        start_time=start_time.isoformat(),
-                        end_time=end_time.isoformat(),
-                        duration_seconds=duration,
-                        error_message=f"Skipping backup for non-DLT table: {source_table}",
-                        details={
-                            "backup_table": backup_table,
-                            "backup_schema_name": backup_schema_name,
-                            "source_table": actual_source_table,
-                            "dlt_type": dlt_type,
-                            "step1_query": step1_query,
-                            "step2_query": step2_query,
-                            "backup_schema_prefix": backup_config.backup_schema_prefix,
-                            "dlt_flag": dlt_flag,
-                        },
-                        attempt_number=attempt,
-                        max_attempts=max_attempts,
-                    )
-                ]
+                return []
 
             # Use custom retry decorator with logging
             @retry_with_logging(table_config.retry, self.logger)

@@ -26,6 +26,7 @@ backup_config:
   create_share: true
   add_to_share: true
   create_backup_share: true
+  backup_legacy_backing_tables: true
   create_dpm_backing_table_share: true
 replication_config:
   enabled: true

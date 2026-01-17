@@ -90,6 +90,7 @@ class ProviderFactory:
         self.db_ops = DatabricksOperations(spark, logger)
         self.db_ops_logging = DatabricksOperations(logging_spark, logger)
         self.completed_run_results: List[RunResult] = []
+        self.target_db_ops = None
 
         # Initialize AuditLogger if audit table is configured
         self.audit_logger: Optional[AuditLogger] = None
@@ -141,6 +142,40 @@ class ProviderFactory:
                 spark=None,
                 logger=self.logger,
                 workspace_client=self.target_workspace_client,
+            )
+
+        # Create or get target sql warehouse id for sql materialized view replication
+        if self._operation_type == "replication" and (
+            self.config.uc_object_types
+            and (
+                UCObjectType.MATERIALIZED_VIEW in self.config.uc_object_types
+                or UCObjectType.STREAMING_TABLE in self.config.uc_object_types
+                or UCObjectType.ALL in self.config.uc_object_types
+            )
+            and self.config.target_databricks_connect_config.warehouse_id is None
+            and self.config.target_databricks_connect_config.warehouse_config
+        ):
+            if self.target_db_ops is None:
+                self.target_workspace_client = create_workspace_client(
+                    host=self.config.target_databricks_connect_config.host,
+                    secret_config=self.config.target_databricks_connect_config.token,
+                    workspace_client=self.workspace_client,
+                    auth_type=self.config.target_databricks_connect_config.auth_type,
+                )
+                self.target_db_ops = DatabricksOperations(
+                    spark=None,
+                    logger=self.logger,
+                    workspace_client=self.target_workspace_client,
+                )
+            self.logger.info("Creating or getting target SQL warehouse...")
+            (
+                self.config.target_databricks_connect_config.warehouse_id,
+                self.config.target_databricks_connect_config.warehouse_config.name,
+            ) = self.target_db_ops.create_or_get_sql_warehouse(
+                self.config.target_databricks_connect_config.warehouse_config.model_dump()
+            )
+            self.logger.info(
+                f"SQL warehouse {self.config.target_databricks_connect_config.warehouse_id} ({self.config.target_databricks_connect_config.warehouse_config.name}) ready for use."
             )
 
     def get_operation_name(self) -> str:
@@ -903,11 +938,16 @@ class ProviderFactory:
                     for r in catalog_results
                     if catalog_results and r.status == "skipped"
                 )
+                failed = sum(
+                    1
+                    for r in catalog_results
+                    if catalog_results and r.status == "failed"
+                )                
                 total = len(catalog_results) if catalog_results else 0
 
                 self.logger.info(
                     f"Completed {operation_name} for catalog {catalog.catalog_name}: "
-                    f"{successful}/{total} operations successful, {skipped}/{total} operations skipped"
+                    f"{successful}/{total} operations successful, {skipped}/{total} operations skipped, {failed}/{total} operations failed"
                 )
 
             except Exception as e:
