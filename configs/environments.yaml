@@ -33,7 +33,7 @@ environments:
         secret_client_id: null
         # Optional: secret client secret for oauth authentication. Required for oauth authentication.
         secret_client_secret: null
-      # Optional: Source cluster ID. default is null to use serverless endpoint.
+      # Optional: Source Standard cluster ID used for source spark session. default is null to use serverless endpoint.
       cluster_id: null
 
     # Mandatory: Target Databricks details
@@ -56,8 +56,28 @@ environments:
         secret_client_id: null
         # Optional: secret client secret for oauth authentication. Required for oauth authentication.
         secret_client_secret: null
-      # Optional: Source cluster ID. default is null to use serverless endpoint.
+      # Optional: Target Standard cluster ID used for target spark session. default is null to use serverless endpoint.
       cluster_id: null
+      # Optional: Target Databricks SQL warehouse ID used for creating sql materialized views. default is null.
+      warehouse_id: 6429d1b1499e3fac
+      # Optional: Target Databricks SQL warehouse config used for creating sql materialized views.
+      warehouse_config:
+        # Optional: whether to create the warehouse if not exists. default is true to reuse existing warehouse with same name
+        create_if_not_exists: true
+        # Optional: Target Databricks SQL warehouse name. default is replication-warehouse.
+        name: "replication-warehouse"
+        # Optional: whether to use serverless endpoint for target spark session. default is true.
+        enable_serverless_compute: true
+        # Optional: Supported values: - 2X-Small - X-Small - Small - Medium - Large - X-Large - 2X-Large - 3X-Large - 4X-Large, default is "Small"
+        cluster_size: "X-Small"
+        # Optional: Supported values: - PRO - CLASSIC, default is "PRO"
+        warehouse_type: "PRO"
+        # Optional: Minimum number of clusters to scale down to. default is 1
+        min_num_clusters: 1
+        # Optional: Maximum number of clusters to scale up to. default is 1
+        max_num_clusters: 1
+        # Optional: Auto stop warehouse after minutes of inactivity. default is 10
+        auto_stop_mins: 10
 
   # Mandatory: environment name
   "aws_to_azure_dev":
@@ -85,7 +105,7 @@ environments:
         secret_client_id: null
         # Optional: secret client secret for oauth authentication. Required for oauth authentication.
         secret_client_secret: null
-      # Optional: Source cluster ID. default is null to use serverless endpoint.
+      # Optional:  Source Standard cluster ID used for source spark session. default is null to use serverless endpoint.
       cluster_id: null
 
     # Mandatory: Target Databricks details
@@ -108,5 +128,5 @@ environments:
         secret_client_id: null
         # Optional: secret client secret for oauth authentication. Required for oauth authentication.
         secret_client_secret: null
-      # Optional: Source cluster ID. default is null to use serverless endpoint.
+      # Optional: Target Standard cluster ID used for target spark session. default is null to use serverless endpoint.
       cluster_id: null

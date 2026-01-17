@@ -17,7 +17,9 @@ from databricks.sdk.service.catalog import (
     SchemaInfo,
     StorageCredentialInfo,
     VolumeInfo,
+    TableInfo,
 )
+from databricks.sdk.service.sql import CreateWarehouseRequestWarehouseType
 from pyspark.sql.functions import col
 
 from data_replication.audit.logger import DataReplicationLogger
@@ -1589,3 +1591,88 @@ class DatabricksOperations:
             raise Exception(
                 f"Failed to get CREATE TABLE DDL for {table_name}: {str(e)}"
             ) from e
+
+    def get_table(self, table_name: str) -> TableInfo:
+        """
+        Get table info using workspace client.
+
+        Args:
+            table_name: Full table name (catalog.schema.table)
+
+        Returns:
+            TableInfo containing table information
+
+        Raises:
+            TableNotFoundError: If getting catalog fails or workspace_client is None
+        """
+        if not self.workspace_client:
+            raise Exception("WorkspaceClient is required for catalog operations")
+
+        try:
+            source_table_info = self.workspace_client.tables.get(table_name.replace("`", ""))
+            return source_table_info
+        except Exception as e:
+            raise TableNotFoundError(f"Failed to get source table {table_name}: {str(e)}") from e
+
+    def get_view_definition(self, table_name: str) -> str | None:
+        """
+        Get view definition info using workspace client.
+
+        Args:
+            table_name: Full table name (catalog.schema.table)
+
+        Returns:
+            str | None containing the view definition
+
+        Raises:
+            Exception: If getting catalog fails or workspace_client is None
+        """
+        view_definition = (
+            self.get_table(table_name).as_dict().get("view_definition", None)
+        )
+        return view_definition
+
+    def create_or_get_sql_warehouse(self, warehouse_config: dict):
+        """
+        Create SQL warehouse using workspace client.
+
+        Args:
+            warehouse_config: Dictionary containing SQL warehouse creation parameters
+
+        Returns:
+            warehouse id and name as string
+
+        Raises:
+            Exception: If SQL warehouse creation fails or workspace_client is None
+        """
+        if not self.workspace_client:
+            raise Exception("WorkspaceClient is required for SQL warehouse operations")
+
+        try:
+            
+            warehouse_name = warehouse_config.get('name',None)
+            if warehouse_name:
+                # use existing warehouse if exists
+                if warehouse_config.get('create_if_not_exists', True):
+                    # Check if a warehouse with the same name already exists
+                    existing_warehouses = list(
+                        self.workspace_client.warehouses.list()
+                    )
+                    for wh in existing_warehouses:
+                        if wh.name == warehouse_name:
+                            return wh.id, wh.name
+            else:
+                # generate unique warehouse name
+                warehouse_name = f'replication-{time.time_ns()}'
+
+            wh_type = CreateWarehouseRequestWarehouseType(warehouse_config.get('warehouse_type').value)
+            created_warehouse = self.workspace_client.warehouses.create(name=warehouse_name,
+                                       cluster_size=warehouse_config.get('cluster_size','X-Small'),
+                                       max_num_clusters=warehouse_config.get('max_num_clusters',1),
+                                       auto_stop_mins=warehouse_config.get('auto_stop_mins',10),
+                                       warehouse_type=wh_type,
+                                       enable_serverless_compute=warehouse_config.get('enable_serverless_compute',True),
+                                       ).result()
+            return created_warehouse.id, created_warehouse.name
+        except Exception as e:
+            raise Exception(f"Failed to create SQL warehouse: {str(e)}") from e

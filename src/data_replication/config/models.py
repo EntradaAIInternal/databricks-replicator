@@ -87,6 +87,8 @@ class UCObjectType(str, Enum):
     COLUMN_COMMENT = "column_comment"
     STORAGE_CREDENTIAL = "storage_credential"
     EXTERNAL_LOCATION = "external_location"
+    MATERIALIZED_VIEW = "materialized_view"
+    STREAMING_TABLE = "streaming_table"
     ALL = "all"
 
 
@@ -152,6 +154,41 @@ class AuditConfig(BaseModel):
         return table_name
 
 
+class WarehouseType(str, Enum):
+    """Enumeration of supported warehouse types."""
+
+    PRO = "PRO"
+    CLASSIC = "CLASSIC"
+
+
+class ClusterSize(str, Enum):
+    """Enumeration of supported cluster sizes."""
+
+    TWO_X_SMALL = "2X-Small"
+    X_SMALL = "X-Small"
+    SMALL = "Small"
+    MEDIUM = "Medium"
+    LARGE = "Large"
+    X_LARGE = "X-Large"
+    TWO_X_LARGE = "2X-Large"
+    THREE_X_LARGE = "3X-Large"
+    FOUR_X_LARGE = "4X-Large"
+
+
+class WarehouseConfig(BaseModel):
+    """Configuration for Databricks SQL Warehouse."""
+
+    model_config = ConfigDict(extra="forbid")
+    create_if_not_exists: Optional[bool] = True
+    name: Optional[str] = None
+    enable_serverless_compute: Optional[bool] = True
+    warehouse_type: Optional[WarehouseType] = WarehouseType.PRO
+    cluster_size: Optional[ClusterSize] = ClusterSize.X_SMALL
+    auto_stop_mins: Optional[int] = 10
+    min_num_clusters: Optional[int] = 1
+    max_num_clusters: Optional[int] = 1
+
+
 class DatabricksConnectConfig(BaseModel):
     """Configuration for Databricks Connect."""
 
@@ -162,7 +199,8 @@ class DatabricksConnectConfig(BaseModel):
     auth_type: Optional[AuthType] = AuthType.PAT
     token: Optional[SecretConfig] = None
     cluster_id: Optional[str] = None
-
+    warehouse_id: Optional[str] = None
+    warehouse_config: Optional[WarehouseConfig] = None
 
 class BackupConfig(BaseModel):
     """Configuration for backup operations."""
@@ -216,6 +254,8 @@ class ReplicationConfig(BaseModel):
     enforce_schema: Optional[bool] = True
     create_or_replace_table: Optional[bool] = False
     create_or_replace_view: Optional[bool] = True
+    create_or_replace_materialized_view: Optional[bool] = True
+    create_or_replace_streaming_table: Optional[bool] = False
     overwrite_tags: Optional[bool] = True
     overwrite_comments: Optional[bool] = True
     replicate_as_managed: Optional[bool] = False
@@ -455,13 +495,13 @@ class EnvironmentConfig(BaseModel):
         """Validate that all keys and values in cloud_url_mapping end with '/'."""
         if v is None:
             return v
-        
+
         for key, value in v.items():
-            if not key.endswith('/'):
+            if not key.endswith("/"):
                 raise ValueError(f"Cloud URL mapping key must end with '/': {key}")
-            if not value.endswith('/'):
+            if not value.endswith("/"):
                 raise ValueError(f"Cloud URL mapping value must end with '/': {value}")
-        
+
         return v
 
 
@@ -572,13 +612,13 @@ class ReplicationSystemConfig(BaseModel):
         """Validate that all keys and values in cloud_url_mapping end with '/'."""
         if v is None:
             return v
-        
+
         for key, value in v.items():
-            if not key.endswith('/'):
+            if not key.endswith("/"):
                 raise ValueError(f"Cloud URL mapping key must end with '/': {key}")
-            if not value.endswith('/'):
+            if not value.endswith("/"):
                 raise ValueError(f"Cloud URL mapping value must end with '/': {value}")
-        
+
         return v
 
     @model_validator(mode="after")

@@ -5,9 +5,14 @@ This module handles replication operations with support for deep clone,
 streaming tables, materialized views, and intermediate catalogs.
 """
 
+from time import sleep
 from datetime import datetime, timezone
 import re
 from typing import List
+
+from databricks.sdk.service.sql import Disposition
+from databricks.sdk.service.sql import StatementState
+from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
 from databricks.sdk.service.catalog import VolumeType
 from data_replication.databricks_operations import DatabricksOperations
 
@@ -241,6 +246,16 @@ class ReplicationProvider(BaseProvider):
                 or UCObjectType.ALL in self.catalog_config.uc_object_types
             ):
                 result = self._uc_replicate_ddl(
+                    schema_name,
+                    table_config,
+                )
+                results.extend(result)
+            if (
+                UCObjectType.MATERIALIZED_VIEW in self.catalog_config.uc_object_types
+                or UCObjectType.STREAMING_TABLE in self.catalog_config.uc_object_types
+                or UCObjectType.ALL in self.catalog_config.uc_object_types
+            ):
+                result = self._uc_replicate_sql_st_mv(
                     schema_name,
                     table_config,
                 )
@@ -2415,7 +2430,7 @@ class ReplicationProvider(BaseProvider):
                 f"Starting replication: {source_table} -> {target_table}",
                 extra={"run_id": self.run_id, "operation": "replication"},
             )
-            # Only replicate if it's a view
+
             if source_table_type.upper() == "VIEW":
                 object_type = "view"
                 result, last_exception, attempt, max_attempts, step1_query = (
@@ -2662,6 +2677,9 @@ class ReplicationProvider(BaseProvider):
             )
         if table_type == "EXTERNAL":
             if replication_config.replicate_as_managed:
+                self.logger.info(
+                    f"Replicating {source_table} as managed. Removing LOCATION clause from DDL. Set replicate_as_managed to false to retain external table.",
+                )
                 # Remove LOCATION clause from DDL
                 pattern = r"""\bLOCATION\s*(['"])[^'"]*\1"""
 
@@ -2671,6 +2689,343 @@ class ReplicationProvider(BaseProvider):
                 step1_query = replace_cloud_url(
                     step1_query, self.cloud_url_mapping, first_only=True
                 )
+        (
+            result,
+            last_exception,
+            attempt,
+            max_attempts,
+        ) = replication_operation(step1_query)
+
+        return result, last_exception, attempt, max_attempts, step1_query
+
+    def _uc_replicate_sql_st_mv(
+        self,
+        schema_name: str,
+        table_config: TableConfig,
+    ) -> List[RunResult]:
+        """
+        Replicate a single sql streaming table or materialized view.
+
+        Args:
+            schema_name: Name of the schema
+            table_config: TableConfig object for the table to replicate
+        Returns:
+            RunResult object for the replication operation
+        """
+        start_time = datetime.now(timezone.utc)
+        table_name = table_config.table_name
+        replication_config = table_config.replication_config
+        source_catalog = replication_config.source_catalog
+        target_catalog = self.catalog_config.catalog_name
+        source_table = f"`{source_catalog}`.`{schema_name}`.`{table_name}`"
+        target_table = f"`{target_catalog}`.`{schema_name}`.`{table_name}`"
+        max_attempts = table_config.retry.max_attempts
+        response_backoff = 10
+
+        # Use custom retry decorator with logging
+        @retry_with_logging(table_config.retry, self.logger)
+        def replication_operation(query: str):
+            self.logger.debug(
+                f"Executing replication query: {query}",
+                extra={"run_id": self.run_id, "operation": "replication"},
+            )
+            resp = self.target_workspace_client.statement_execution.execute_statement(
+                warehouse_id=self.target_databricks_config.warehouse_id,
+                wait_timeout="0s",
+                on_wait_timeout=ExecuteStatementRequestOnWaitTimeout("CONTINUE"),
+                disposition=Disposition("EXTERNAL_LINKS"),
+                statement=query,
+            )
+
+            while resp.status.state in {StatementState.PENDING, StatementState.RUNNING}:
+                resp = self.target_workspace_client.statement_execution.get_statement(
+                    resp.statement_id
+                )
+                sleep(response_backoff)
+
+            if resp.status.state != StatementState.SUCCEEDED:
+                raise ReplicationError(f"{resp.status.error.message}")
+            return True
+
+        source_table_type = self.db_ops.get_table_type(source_table)
+        object_type = source_table_type.lower()
+        if source_table_type.upper() not in ["MATERIALIZED_VIEW", "STREAMING_TABLE"]:
+            self.logger.warning(
+                f"Create DDL is not supported for {source_table_type} and are skipped for {source_table} -> {target_table}.",
+                extra={"run_id": self.run_id, "operation": "uc_replication"},
+            )
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+            return [
+                RunResult(
+                    operation_type="uc_replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=table_name,
+                    object_type=object_type,
+                    status="skipped",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    error_message=f"Create DDL is not supported for {source_table_type}",
+                    details={
+                        "target_table": target_table,
+                        "source_table": source_table,
+                        "table_type": source_table_type.lower(),
+                    },
+                    attempt_number=1,
+                    max_attempts=max_attempts,
+                )
+            ]
+
+        # Check if source view definition
+        view_definition = self.db_ops.get_view_definition(source_table)
+
+        if view_definition is None:
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+            return [
+                RunResult(
+                    operation_type="uc_replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=table_name,
+                    object_type=object_type,
+                    status="skipped",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    error_message=f"SQL definition not found. Only SQL {source_table_type.lower()} supported. Use DLT pipeline to create non-sql {source_table_type.lower()} instead.",
+                    details={
+                        "target_table": target_table,
+                        "source_table": source_table,
+                        "table_type": source_table_type.lower(),
+                    },
+                    attempt_number=1,
+                    max_attempts=max_attempts,
+                )
+            ]
+
+        try:
+            self.logger.info(
+                f"Starting replication: {source_table} -> {target_table} with SQL warehouse {self.target_databricks_config.warehouse_id}",
+                extra={"run_id": self.run_id, "operation": "replication"},
+            )
+
+            if source_table_type.upper() == "MATERIALIZED_VIEW":
+                result, last_exception, attempt, max_attempts, step1_query = (
+                    self._uc_replicate_sql_materialized_view(
+                        source_table,
+                        target_table,
+                        max_attempts,
+                        replication_operation,
+                        replication_config,
+                    )
+                )
+            else:
+                result, last_exception, attempt, max_attempts, step1_query = (
+                    self._uc_replicate_sql_streaming_table(
+                        source_table,
+                        target_table,
+                        max_attempts,
+                        replication_operation,
+                        replication_config,
+                    )
+                )
+
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+
+            if result:
+                self.logger.info(
+                    f"Replication completed successfully: {source_table} -> {target_table} "
+                    f"({duration:.2f}s)",
+                    extra={"run_id": self.run_id, "operation": "replication"},
+                )
+
+                return [
+                    RunResult(
+                        operation_type="uc_replication",
+                        catalog_name=target_catalog,
+                        schema_name=schema_name,
+                        object_name=table_name,
+                        object_type=object_type,
+                        status="success",
+                        start_time=start_time.isoformat(),
+                        end_time=end_time.isoformat(),
+                        duration_seconds=duration,
+                        details={
+                            "target_table": target_table,
+                            "source_table": source_table,
+                            "table_type": source_table_type.lower(),
+                            "step1_query": step1_query,
+                        },
+                        attempt_number=attempt,
+                        max_attempts=max_attempts,
+                    )
+                ]
+
+            error_msg = (
+                f"Replication failed after {max_attempts} attempts: "
+                f"{source_table} -> {target_table}"
+            )
+            if last_exception:
+                error_msg += f" | Last error: {str(last_exception)}"
+
+            self.logger.error(
+                error_msg,
+                extra={"run_id": self.run_id, "operation": "uc_replication"},
+            )
+
+            return [
+                RunResult(
+                    operation_type="uc_replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=table_name,
+                    object_type=object_type,
+                    status="failed",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    error_message=error_msg,
+                    details={
+                        "target_table": target_table,
+                        "source_table": source_table,
+                        "table_type": source_table_type.lower(),
+                        "step1_query": step1_query,
+                    },
+                    attempt_number=attempt,
+                    max_attempts=max_attempts,
+                )
+            ]
+
+        except Exception as e:
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+
+            # Wrap in ReplicationError for better error categorization
+            if not isinstance(e, ReplicationError):
+                e = ReplicationError(f"Replication operation failed: {str(e)}")
+
+            error_msg = f"Failed to replicate {object_type} {source_table}: {str(e)}"
+            self.logger.error(
+                error_msg,
+                extra={"run_id": self.run_id, "operation": "uc_replication"},
+            )
+
+            return [
+                RunResult(
+                    operation_type="uc_replication",
+                    catalog_name=target_catalog,
+                    schema_name=schema_name,
+                    object_name=table_name,
+                    object_type=object_type,
+                    status="failed",
+                    start_time=start_time.isoformat(),
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    error_message=error_msg,
+                    details={
+                        "target_table": target_table,
+                        "source_table": source_table,
+                    },
+                    attempt_number=attempt,
+                    max_attempts=max_attempts,
+                )
+            ]
+
+    def _uc_replicate_sql_materialized_view(
+        self,
+        source_table: str,
+        target_table: str,
+        max_attempts: int,
+        replication_operation,
+        replication_config,
+    ) -> List[RunResult]:
+        """
+        Replicate a single materialized view using create or replace.
+
+        Args:
+            source_table: Full source table name
+            target_table: Full target table name
+            max_attempts: Maximum number of retry attempts
+            replication_operation: Function to execute the replication operation
+
+        Returns:
+            Tuple containing:
+                - result: Boolean indicating success or failure
+                - last_exception: Last exception encountered, if any
+                - attempt: Number of attempts made
+                - max_attempts: Maximum number of attempts allowed
+                - step1_query: The query used for replication
+        """
+
+        step1_query = None
+        attempt = 1
+        table_stmt = self.source_dbops.show_create_table_ddl(source_table)
+
+        if replication_config.create_or_replace_materialized_view:
+            step1_query = table_stmt.replace(
+                table_stmt.split("(", maxsplit=1)[0],
+                f"CREATE OR REPLACE MATERIALIZED VIEW {target_table} ",
+            )
+        else:
+            step1_query = table_stmt.replace(
+                table_stmt.split("(", maxsplit=1)[0],
+                f"CREATE MATERIALIZED VIEW IF NOT EXISTS {target_table} ",
+            )
+        (
+            result,
+            last_exception,
+            attempt,
+            max_attempts,
+        ) = replication_operation(step1_query)
+
+        return result, last_exception, attempt, max_attempts, step1_query
+
+    def _uc_replicate_sql_streaming_table(
+        self,
+        source_table: str,
+        target_table: str,
+        max_attempts: int,
+        replication_operation,
+        replication_config,
+    ) -> List[RunResult]:
+        """
+        Replicate a single streaming table using create or replace.
+
+        Args:
+            source_table: Full source table name
+            target_table: Full target table name
+            max_attempts: Maximum number of retry attempts
+            replication_operation: Function to execute the replication operation
+        Returns:
+            Tuple containing:
+                - result: Boolean indicating success or failure
+                - last_exception: Last exception encountered, if any
+                - attempt: Number of attempts made
+                - max_attempts: Maximum number of attempts allowed
+                - step1_query: The query used for replication
+        """
+
+        step1_query = None
+        attempt = 1
+        table_stmt = self.source_dbops.show_create_table_ddl(source_table)
+
+        if replication_config.create_or_replace_streaming_table:
+            step1_query = table_stmt.replace(
+                table_stmt.split("(", maxsplit=1)[0],
+                f"CREATE OR REPLACE STREAMING TABLE {target_table} ",
+            )
+        else:
+            step1_query = table_stmt.replace(
+                table_stmt.split("(", maxsplit=1)[0],
+                f"CREATE STREAMING TABLE IF NOT EXISTS {target_table} ",
+            )
+        # Map external location if needed
+        step1_query = replace_cloud_url(
+            step1_query, self.cloud_url_mapping, first_only=False
+        )
         (
             result,
             last_exception,

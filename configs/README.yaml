@@ -57,6 +57,8 @@ uc_object_types: [
     "volume_tag",
     "column_tag",
     "column_comment",
+    "materialized_view",
+    "streaming_table"
     # "permission"
   ]
 
@@ -121,8 +123,12 @@ replication_config:
   replicate_enable_predictive_optimization: false
   # Optional: whether to create or replace table during UC table replication. default is false to use create table if not exists.
   create_or_replace_table: false
-  # Optional: whether to create or replace view during UC view replication. default is false to use create view if not exists.
+  # Optional: whether to create or replace view during UC view replication. default is true to use create or replace view.
   create_or_replace_view: true
+  # Optional: whether to create or replace materialized view during UC materialized view replication. default is true to use create or replace materialized view.
+  create_or_replace_materialized_view: true
+  # Optional: whether to create or replace streaming table during UC streaming table replication. default is false.
+  create_or_replace_streaming_table: false
   # Optional: whether to overwrite tags during replication. default is true.
   overwrite_tags: true
   # Optional: whether to overwrite comments during replication. default is true.
